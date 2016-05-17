@@ -16,10 +16,16 @@
 
 Ext.define('Traccar.store.TimeUnits', {
     extend: 'Ext.data.Store',
-    fields: ['multiplier', 'name'],
-    data: [
-        {'multiplier': 1, 'name': strings.sharedSecond},
-        {'multiplier': 60, 'name': strings.sharedMinute},
-        {'multiplier': 3600, 'name': strings.sharedHour}
-    ]
+    fields: ['name', 'factor'],
+
+    data: [{
+        name: Strings.sharedSecond,
+        factor: 1
+    }, {
+        name: Strings.sharedMinute,
+        factor: 60
+    }, {
+        name: Strings.sharedHour,
+        factor: 3600
+    }]
 });

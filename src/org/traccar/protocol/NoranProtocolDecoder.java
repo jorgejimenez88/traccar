@@ -15,19 +15,21 @@
  */
 package org.traccar.protocol;
 
-import java.net.SocketAddress;
-import java.nio.ByteOrder;
-import java.nio.charset.Charset;
-import java.text.DateFormat;
-import java.text.SimpleDateFormat;
-import java.util.Calendar;
-import java.util.TimeZone;
 import org.jboss.netty.buffer.ChannelBuffer;
 import org.jboss.netty.buffer.ChannelBuffers;
 import org.jboss.netty.channel.Channel;
 import org.traccar.BaseProtocolDecoder;
+import org.traccar.helper.BitUtil;
+import org.traccar.helper.DateBuilder;
+import org.traccar.helper.UnitsConverter;
 import org.traccar.model.Event;
 import org.traccar.model.Position;
+
+import java.net.SocketAddress;
+import java.nio.ByteOrder;
+import java.nio.charset.StandardCharsets;
+import java.text.DateFormat;
+import java.text.SimpleDateFormat;
 
 public class NoranProtocolDecoder extends BaseProtocolDecoder {
 
@@ -35,112 +37,101 @@ public class NoranProtocolDecoder extends BaseProtocolDecoder {
         super(protocol);
     }
 
-    private static final DateFormat dateFormat = new SimpleDateFormat("yy-MM-dd HH:mm:ss");
-
-    private static final int MSG_UPLOAD_POSITION = 0x0008;
-    private static final int MSG_UPLOAD_POSITION_NEW = 0x0032;
-    private static final int MSG_CONTROL_RESPONSE = 0x8009;
-    private static final int MSG_ALARM = 0x0003;
-    private static final int MSG_SHAKE_HAND = 0x0000;
-    private static final int MSG_SHAKE_HAND_RESPONSE = 0x8000;
-    private static final int MSG_IMAGE_SIZE = 0x0200;
-    private static final int MSG_IMAGE_PACKET = 0x0201;
-    
+    public static final int MSG_UPLOAD_POSITION = 0x0008;
+    public static final int MSG_UPLOAD_POSITION_NEW = 0x0032;
+    public static final int MSG_CONTROL = 0x0002;
+    public static final int MSG_CONTROL_RESPONSE = 0x8009;
+    public static final int MSG_ALARM = 0x0003;
+    public static final int MSG_SHAKE_HAND = 0x0000;
+    public static final int MSG_SHAKE_HAND_RESPONSE = 0x8000;
+    public static final int MSG_IMAGE_SIZE = 0x0200;
+    public static final int MSG_IMAGE_PACKET = 0x0201;
 
     @Override
     protected Object decode(
-            Channel channel, SocketAddress remoteAddress, Object msg)
-            throws Exception {
-        
+            Channel channel, SocketAddress remoteAddress, Object msg) throws Exception {
+
         ChannelBuffer buf = (ChannelBuffer) msg;
-        
+
         buf.readUnsignedShort(); // length
         int type = buf.readUnsignedShort();
-        
+
         if (type == MSG_SHAKE_HAND && channel != null) {
-            
+
             ChannelBuffer response = ChannelBuffers.dynamicBuffer(ByteOrder.LITTLE_ENDIAN, 13);
-            response.writeBytes(ChannelBuffers.copiedBuffer(ByteOrder.LITTLE_ENDIAN, "\r\n*KW", Charset.defaultCharset()));
+            response.writeBytes(
+                    ChannelBuffers.copiedBuffer(ByteOrder.LITTLE_ENDIAN, "\r\n*KW", StandardCharsets.US_ASCII));
             response.writeByte(0);
             response.writeShort(response.capacity());
             response.writeShort(MSG_SHAKE_HAND_RESPONSE);
             response.writeByte(1); // status
-            response.writeBytes(ChannelBuffers.copiedBuffer(ByteOrder.LITTLE_ENDIAN, "\r\n", Charset.defaultCharset()));
-            
+            response.writeBytes(
+                    ChannelBuffers.copiedBuffer(ByteOrder.LITTLE_ENDIAN, "\r\n", StandardCharsets.US_ASCII));
+
             channel.write(response, remoteAddress);
-        }
-        
-        else if (type == MSG_UPLOAD_POSITION ||
-                 type == MSG_UPLOAD_POSITION_NEW ||
-                 type == MSG_CONTROL_RESPONSE ||
-                 type == MSG_ALARM) {
+
+        } else if (type == MSG_UPLOAD_POSITION || type == MSG_UPLOAD_POSITION_NEW
+                || type == MSG_CONTROL_RESPONSE || type == MSG_ALARM) {
 
             boolean newFormat = false;
-            /*if (((type == MSG_UPLOAD_POSITION || type == MSG_ALARM) && buf.readableBytes() == 30) ||
-                ((type == MSG_CONTROL_RESPONSE) && buf.readableBytes() == 39)) {
-                newFormat = false;
-            }*/
-            if (((type == MSG_UPLOAD_POSITION || type == MSG_ALARM) && buf.readableBytes() == 48) ||
-                ((type == MSG_CONTROL_RESPONSE) && buf.readableBytes() == 57) ||
-                ((type == MSG_UPLOAD_POSITION_NEW))) {
+            if (type == MSG_UPLOAD_POSITION && buf.readableBytes() == 48
+                    || type == MSG_ALARM && buf.readableBytes() == 48
+                    || type == MSG_CONTROL_RESPONSE && buf.readableBytes() == 57) {
                 newFormat = true;
             }
 
-            // Create new position
             Position position = new Position();
             position.setProtocol(getProtocolName());
-            
+
             if (type == MSG_CONTROL_RESPONSE) {
                 buf.readUnsignedInt(); // GIS ip
                 buf.readUnsignedInt(); // GIS port
             }
 
-            // Flags
-            int flags = buf.readUnsignedByte();
-            position.setValid((flags & 0x01) != 0);
+            position.setValid(BitUtil.check(buf.readUnsignedByte(), 0));
 
-            // Alarm type
             position.set(Event.KEY_ALARM, buf.readUnsignedByte());
 
-            // Location
             if (newFormat) {
-                position.setSpeed(buf.readUnsignedInt());
+                position.setSpeed(UnitsConverter.knotsFromKph(buf.readUnsignedInt()));
                 position.setCourse(buf.readFloat());
             } else {
-                position.setSpeed(buf.readUnsignedByte());
+                position.setSpeed(UnitsConverter.knotsFromKph(buf.readUnsignedByte()));
                 position.setCourse(buf.readUnsignedShort());
             }
             position.setLongitude(buf.readFloat());
             position.setLatitude(buf.readFloat());
 
-            // Time
             if (!newFormat) {
                 long timeValue = buf.readUnsignedInt();
-                Calendar time = Calendar.getInstance(TimeZone.getTimeZone("UTC"));
-                time.clear();
-                time.set(Calendar.YEAR, 2000 + (int) (timeValue >> 26));
-                time.set(Calendar.MONTH, (int) (timeValue >> 22 & 0x0f) - 1);
-                time.set(Calendar.DAY_OF_MONTH, (int) (timeValue >> 17 & 0x1f));
-                time.set(Calendar.HOUR_OF_DAY, (int) (timeValue >> 12 & 0x1f));
-                time.set(Calendar.MINUTE, (int) (timeValue >> 6 & 0x3f));
-                time.set(Calendar.SECOND, (int) (timeValue & 0x3f));
-                position.setTime(time.getTime());
+                DateBuilder dateBuilder = new DateBuilder()
+                        .setYear((int) BitUtil.from(timeValue, 26))
+                        .setMonth((int) BitUtil.between(timeValue, 22, 26))
+                        .setDay((int) BitUtil.between(timeValue, 17, 22))
+                        .setHour((int) BitUtil.between(timeValue, 12, 17))
+                        .setMinute((int) BitUtil.between(timeValue, 6, 12))
+                        .setSecond((int) BitUtil.to(timeValue, 6));
+                position.setTime(dateBuilder.getDate());
             }
 
-            // Identification
-            String id = buf.readBytes(newFormat ? 12 : 11).toString(Charset.defaultCharset()).replaceAll("[^\\p{Print}]", "");
+            ChannelBuffer rawId;
+            if (newFormat) {
+                rawId = buf.readBytes(12);
+            } else {
+                rawId = buf.readBytes(11);
+            }
+            String id = rawId.toString(StandardCharsets.US_ASCII).replaceAll("[^\\p{Print}]", "");
             if (!identify(id, channel, remoteAddress)) {
                 return null;
             }
             position.setDeviceId(getDeviceId());
 
-            // Time
             if (newFormat) {
-                position.setTime(dateFormat.parse(buf.readBytes(17).toString(Charset.defaultCharset())));
+                DateFormat dateFormat = new SimpleDateFormat("yy-MM-dd HH:mm:ss");
+                position.setTime(dateFormat.parse(buf.readBytes(17).toString(StandardCharsets.US_ASCII)));
                 buf.readByte();
             }
 
-            // Other data
             if (!newFormat) {
                 position.set(Event.PREFIX_IO + 1, buf.readUnsignedByte());
                 position.set(Event.KEY_FUEL, buf.readUnsignedByte());

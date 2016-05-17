@@ -15,17 +15,15 @@
  */
 package org.traccar.protocol;
 
-import java.net.SocketAddress;
-import java.util.Calendar; 
-import java.util.TimeZone;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-
 import org.jboss.netty.channel.Channel;
-import org.jboss.netty.channel.ChannelHandlerContext;
-
 import org.traccar.BaseProtocolDecoder;
+import org.traccar.helper.DateBuilder;
+import org.traccar.helper.Parser;
+import org.traccar.helper.PatternBuilder;
 import org.traccar.model.Position;
+
+import java.net.SocketAddress;
+import java.util.regex.Pattern;
 
 public class Tk102ProtocolDecoder extends BaseProtocolDecoder {
 
@@ -33,87 +31,62 @@ public class Tk102ProtocolDecoder extends BaseProtocolDecoder {
         super(protocol);
     }
 
-    static private Pattern pattern = Pattern.compile(
-            "\\[.\\d{10}.\\(\\p{Upper}+" +
-            "(\\d{2})(\\d{2})(\\d{2})" +   // Time (HHMMSS)
-            "([AV])" +                     // Validity
-            "(\\d{2})(\\d{2}\\.\\d{4})" +  // Latitude (DDMM.MMMM)
-            "([NS])" +
-            "(\\d{3})(\\d{2}\\.\\d{4})" +  // Longitude (DDDMM.MMMM)
-            "([EW])" +
-            "(\\d{3}\\.\\d{3})" +          // Speed
-            "(\\d{2})(\\d{2})(\\d{2})" +   // Date (DDMMYY)
-            "\\d+.*\\)\\]?");
+    private static final Pattern PATTERN = new PatternBuilder()
+            .text("[")
+            .expression(".")
+            .number("d{10}")
+            .expression(".")
+            .text("(")
+            .expression("[A-Z]+")
+            .number("(dd)(dd)(dd)")              // time
+            .expression("([AV])")                // validity
+            .number("(dd)(dd.dddd)([NS])")       // latitude
+            .number("(ddd)(dd.dddd)([EW])")      // longitude
+            .number("(ddd.ddd)")                 // speed
+            .number("(dd)(dd)(dd)")              // date (ddmmyy)
+            .number("d+")
+            .any()
+            .text(")")
+            .text("]").optional()
+            .compile();
 
     @Override
     protected Object decode(
-            Channel channel, SocketAddress remoteAddress, Object msg)
-            throws Exception {
+            Channel channel, SocketAddress remoteAddress, Object msg) throws Exception {
 
         String sentence = (String) msg;
 
-        // Login
         if (sentence.startsWith("[!")) {
-            if (!identify(sentence.substring(14, 14 + 15), channel)) {
+
+            if (!identify(sentence.substring(14, 14 + 15), channel, remoteAddress)) {
                 return null;
             }
-
             if (channel != null) {
                 channel.write("[”0000000001" + sentence.substring(13) + "]");
             }
-        }
 
-        // Quit
-        else if (sentence.startsWith("[#")) {
-            // TODO: Send response
-        }
+        } else if (hasDeviceId()) {
 
-        // Parse message
-        else if (hasDeviceId()) {
-
-            // Parse message
-            Matcher parser = pattern.matcher(sentence);
+            Parser parser = new Parser(PATTERN, sentence);
             if (!parser.matches()) {
                 return null;
             }
 
-            // Create new position
             Position position = new Position();
             position.setProtocol(getProtocolName());
             position.setDeviceId(getDeviceId());
 
-            Integer index = 1;
+            DateBuilder dateBuilder = new DateBuilder()
+                    .setTime(parser.nextInt(), parser.nextInt(), parser.nextInt());
 
-            // Time
-            Calendar time = Calendar.getInstance(TimeZone.getTimeZone("UTC"));
-            time.clear();
-            time.set(Calendar.HOUR_OF_DAY, Integer.valueOf(parser.group(index++)));
-            time.set(Calendar.MINUTE, Integer.valueOf(parser.group(index++)));
-            time.set(Calendar.SECOND, Integer.valueOf(parser.group(index++)));
+            position.setValid(parser.next().equals("A"));
+            position.setLatitude(parser.nextCoordinate());
+            position.setLongitude(parser.nextCoordinate());
+            position.setSpeed(parser.nextDouble());
 
-            // Validity
-            position.setValid(parser.group(index++).compareTo("A") == 0);
+            dateBuilder.setDateReverse(parser.nextInt(), parser.nextInt(), parser.nextInt());
+            position.setTime(dateBuilder.getDate());
 
-            // Latitude
-            Double latitude = Double.valueOf(parser.group(index++));
-            latitude += Double.valueOf(parser.group(index++)) / 60;
-            if (parser.group(index++).compareTo("S") == 0) latitude = -latitude;
-            position.setLatitude(latitude);
-
-            // Longitude
-            Double longitude = Double.valueOf(parser.group(index++));
-            longitude += Double.valueOf(parser.group(index++)) / 60;
-            if (parser.group(index++).compareTo("W") == 0) longitude = -longitude;
-            position.setLongitude(longitude);
-
-            // Speed
-            position.setSpeed(Double.valueOf(parser.group(index++)));
-
-            // Date
-            time.set(Calendar.DAY_OF_MONTH, Integer.valueOf(parser.group(index++)));
-            time.set(Calendar.MONTH, Integer.valueOf(parser.group(index++)) - 1);
-            time.set(Calendar.YEAR, 2000 + Integer.valueOf(parser.group(index++)));
-            position.setTime(time.getTime());
             return position;
         }
 

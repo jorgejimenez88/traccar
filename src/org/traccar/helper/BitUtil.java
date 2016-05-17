@@ -15,29 +15,37 @@
  */
 package org.traccar.helper;
 
-/**
- * Useful functions to work with bits
- */
-public class BitUtil {
-    
+public final class BitUtil {
+
+    private BitUtil() {
+    }
+
     public static boolean check(long number, int index) {
         return (number & (1 << index)) != 0;
     }
-    
-    public static int range(int number, int index) {
-        return (number >> index);
+
+    public static int between(int number, int from, int to) {
+        return (number >> from) & ((1 << to - from) - 1);
     }
-    
-    public static int range(int number, int index, int length) {
-        return (number >> index) & ((1 << length) - 1);
+
+    public static int from(int number, int from) {
+        return number >> from;
     }
-    
-    public static long range(long number, int index) {
-        return (number >> index);
+
+    public static int to(int number, int to) {
+        return between(number, 0, to);
     }
-    
-    public static long range(long number, int index, int length) {
-        return (number >> index) & ((1l << length) - 1);
+
+    public static long between(long number, int from, int to) {
+        return (number >> from) & ((1L << to - from) - 1L);
     }
-    
+
+    public static long from(long number, int from) {
+        return number >> from;
+    }
+
+    public static long to(long number, int to) {
+        return between(number, 0, to);
+    }
+
 }

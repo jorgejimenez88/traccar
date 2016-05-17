@@ -17,7 +17,6 @@ package org.traccar.protocol;
 
 import org.jboss.netty.bootstrap.ServerBootstrap;
 import org.jboss.netty.channel.ChannelPipeline;
-import org.jboss.netty.handler.codec.frame.LineBasedFrameDecoder;
 import org.jboss.netty.handler.codec.string.StringDecoder;
 import org.jboss.netty.handler.codec.string.StringEncoder;
 import org.traccar.BaseProtocol;
@@ -36,9 +35,9 @@ public class MegastekProtocol extends BaseProtocol {
         serverList.add(new TrackerServer(new ServerBootstrap(), this.getName()) {
             @Override
             protected void addSpecificHandlers(ChannelPipeline pipeline) {
-                pipeline.addLast("frameDecoder", new LineBasedFrameDecoder(1024));
-                pipeline.addLast("stringDecoder", new StringDecoder());
+                pipeline.addLast("frameDecoder", new MegastekFrameDecoder());
                 pipeline.addLast("stringEncoder", new StringEncoder());
+                pipeline.addLast("stringDecoder", new StringDecoder());
                 pipeline.addLast("objectDecoder", new MegastekProtocolDecoder(MegastekProtocol.this));
             }
         });

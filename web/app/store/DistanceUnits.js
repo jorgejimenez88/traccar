@@ -16,27 +16,24 @@
 
 Ext.define('Traccar.store.DistanceUnits', {
     extend: 'Ext.data.Store',
-    fields: ['key', 'name'],
-    data: [
-        {'key': 'km', 'name': strings.sharedKm},
-        {'key': 'mi', 'name': strings.sharedMi}
-    ],
-    
-    convert: function(value, unit) {
-        switch (unit) {
-            case 'km':
-                return Math.round(value * 0.1) / 100;
-            case 'mi':
-                return Math.round(value * 0.0621371) / 100;
+    fields: ['key', 'name', 'factor'],
+
+    data: [{
+        key: 'km',
+        name: Strings.sharedKm,
+        factor: 0.001
+    }, {
+        key: 'mi',
+        name: Strings.sharedMi,
+        factor: 0.000621371
+    }],
+
+    formatValue: function (value, unit) {
+        var model;
+        if (!unit) {
+            unit = 'km';
         }
-        return value;
-    },
-    
-    getUnitName: function(unit) {
-        if (unit) {
-            return this.findRecord('key', unit).get('name');
-        } else {
-            return '';
-        }
+        model = this.findRecord('key', unit);
+        return (value * model.get('factor')).toFixed(2) + ' ' + model.get('name');
     }
 });

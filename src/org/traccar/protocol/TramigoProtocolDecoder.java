@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 - 2015 Anton Tananaev (anton.tananaev@gmail.com)
+ * Copyright 2014 - 2016 Anton Tananaev (anton.tananaev@gmail.com)
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,17 +18,17 @@ package org.traccar.protocol;
 import org.jboss.netty.buffer.ChannelBuffer;
 import org.jboss.netty.buffer.ChannelBuffers;
 import org.jboss.netty.channel.Channel;
-import org.jboss.netty.channel.ChannelHandlerContext;
 import org.traccar.BaseProtocolDecoder;
+import org.traccar.helper.DateUtil;
 import org.traccar.helper.UnitsConverter;
 import org.traccar.model.Event;
 import org.traccar.model.Position;
 
-import java.nio.charset.Charset;
+import java.net.SocketAddress;
+import java.nio.charset.StandardCharsets;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
-import java.net.SocketAddress;
-import java.util.Calendar; 
+import java.util.Calendar;
 import java.util.Date;
 import java.util.Locale;
 import java.util.regex.Matcher;
@@ -40,13 +40,12 @@ public class TramigoProtocolDecoder extends BaseProtocolDecoder {
         super(protocol);
     }
 
-    private static final int MSG_COMPACT = 0x0100;
-    private static final int MSG_FULL = 0x00FE;
+    public static final int MSG_COMPACT = 0x0100;
+    public static final int MSG_FULL = 0x00FE;
 
     @Override
     protected Object decode(
-            Channel channel, SocketAddress remoteAddress, Object msg)
-            throws Exception {
+            Channel channel, SocketAddress remoteAddress, Object msg) throws Exception {
 
         ChannelBuffer buf = (ChannelBuffer) msg;
 
@@ -60,21 +59,19 @@ public class TramigoProtocolDecoder extends BaseProtocolDecoder {
         long id = buf.readUnsignedInt();
         buf.readUnsignedInt(); // time
 
-        // Create new position
         Position position = new Position();
         position.setProtocol(getProtocolName());
         position.set(Event.KEY_INDEX, index);
         position.setValid(true);
 
-        // Get device id
-        if (!identify(String.valueOf(id), channel)) {
+        if (!identify(String.valueOf(id), channel, remoteAddress)) {
             return null;
         }
         position.setDeviceId(getDeviceId());
 
         if (protocol == 0x01 && (type == MSG_COMPACT || type == MSG_FULL)) {
 
-            // TODO: send ack
+            // need to send ack?
 
             buf.readUnsignedShort(); // report trigger
             buf.readUnsignedShort(); // state flag
@@ -88,7 +85,7 @@ public class TramigoProtocolDecoder extends BaseProtocolDecoder {
             buf.readUnsignedShort(); // GPS antenna state
 
             position.setSpeed(buf.readUnsignedShort() * 0.194384);
-            position.setCourse((double )buf.readUnsignedShort());
+            position.setCourse((double) buf.readUnsignedShort());
 
             buf.readUnsignedInt(); // distance
 
@@ -98,43 +95,50 @@ public class TramigoProtocolDecoder extends BaseProtocolDecoder {
 
             position.setTime(new Date(buf.readUnsignedInt() * 1000));
 
-            // TODO: parse other data
+            // parse other data
+
             return position;
 
         } else if (protocol == 0x80) {
 
             if (channel != null) {
-                channel.write(ChannelBuffers.copiedBuffer("gprs,ack," + index, Charset.defaultCharset()));
+                channel.write(ChannelBuffers.copiedBuffer("gprs,ack," + index, StandardCharsets.US_ASCII));
             }
 
-            String sentence = buf.toString(Charset.defaultCharset());
+            String sentence = buf.toString(StandardCharsets.US_ASCII);
 
-            // Coordinates
             Pattern pattern = Pattern.compile("(-?\\d+\\.\\d+), (-?\\d+\\.\\d+)");
             Matcher matcher = pattern.matcher(sentence);
             if (!matcher.find()) {
                 return null;
             }
-            position.setLatitude(Double.valueOf(matcher.group(1)));
-            position.setLongitude(Double.valueOf(matcher.group(2)));
+            position.setLatitude(Double.parseDouble(matcher.group(1)));
+            position.setLongitude(Double.parseDouble(matcher.group(2)));
 
-            // Speed and Course
             pattern = Pattern.compile("([NSWE]{1,2}) with speed (\\d+) km/h");
             matcher = pattern.matcher(sentence);
             if (matcher.find()) {
-                position.setSpeed(UnitsConverter.knotsFromKph(Double.valueOf(matcher.group(2))));
+                position.setSpeed(UnitsConverter.knotsFromKph(Double.parseDouble(matcher.group(2))));
                 position.setCourse(0); // matcher.group(1) for course
             }
 
-            // Time
             pattern = Pattern.compile("(\\d{1,2}:\\d{2} \\w{3} \\d{1,2})");
             matcher = pattern.matcher(sentence);
             if (!matcher.find()) {
                 return null;
             }
             DateFormat dateFormat = new SimpleDateFormat("HH:mm MMM d yyyy", Locale.ENGLISH);
-            position.setTime(dateFormat.parse(matcher.group(1) + " " + Calendar.getInstance().get(Calendar.YEAR)));
+            position.setTime(DateUtil.correctYear(
+                    dateFormat.parse(matcher.group(1) + " " + Calendar.getInstance().get(Calendar.YEAR))));
+
+            if (sentence.contains("Ignition on detected")) {
+                position.set(Event.KEY_IGNITION, true);
+            } else if (sentence.contains("Ignition off detected")) {
+                position.set(Event.KEY_IGNITION, false);
+            }
+
             return position;
+
         }
 
         return null;

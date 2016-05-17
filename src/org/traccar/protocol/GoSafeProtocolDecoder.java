@@ -1,5 +1,5 @@
 /*
- * Copyright 2015 Anton Tananaev (anton.tananaev@gmail.com)
+ * Copyright 2015 - 2016 Anton Tananaev (anton.tananaev@gmail.com)
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,15 +15,21 @@
  */
 package org.traccar.protocol;
 
-import java.net.SocketAddress;
-import java.util.Calendar;
-import java.util.TimeZone;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import org.jboss.netty.channel.Channel;
 import org.traccar.BaseProtocolDecoder;
+import org.traccar.helper.BitUtil;
+import org.traccar.helper.DateBuilder;
+import org.traccar.helper.Parser;
+import org.traccar.helper.PatternBuilder;
+import org.traccar.helper.UnitsConverter;
 import org.traccar.model.Event;
 import org.traccar.model.Position;
+
+import java.net.SocketAddress;
+import java.util.Date;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.regex.Pattern;
 
 public class GoSafeProtocolDecoder extends BaseProtocolDecoder {
 
@@ -31,84 +37,207 @@ public class GoSafeProtocolDecoder extends BaseProtocolDecoder {
         super(protocol);
     }
 
-    private static final Pattern pattern = Pattern.compile(
-            "\\*[^,]+," +
-            "(\\d+)," +                         // IMEI
-            "(\\d{2})(\\d{2})(\\d{2})" +        // Time
-            "(\\d{2})(\\d{2})(\\d{2})," +       // Date
-            ".*," +
-            "GPS.([AV]);" +                     // Validity
-            "\\d+;" +
-            "([NS])(\\d+\\.\\d+);" +            // Latitude
-            "([EW])(\\d+\\.\\d+);" +            // Longitude
-            "(\\d+);" +                         // Speed
-            "(\\d+);" +                         // Course
-            "(\\d+);" +                         // Altitude
-            "(\\d+\\.\\d+)" +                   // HDOP
-            ".*");
+    private static final Pattern PATTERN = new PatternBuilder()
+            .text("*GS")                         // header
+            .number("d+,")                       // protocol version
+            .number("(d+),")                     // imei
+            .number("(dd)(dd)(dd)")              // time
+            .number("(dd)(dd)(dd),")             // date
+            .expression("(.*)#?")                // data
+            .compile();
+
+    private static final Pattern PATTERN_ITEM = new PatternBuilder()
+            .number("(x+)?,").optional()         // event
+            .groupBegin()
+            .text("SYS:")
+            .expression("[^,]*,")
+            .groupEnd("?")
+            .groupBegin()
+            .text("GPS:")
+            .expression("([AV]);")               // validity
+            .number("(d+);")                     // satellites
+            .number("([NS])(d+.d+);")            // latitude
+            .number("([EW])(d+.d+);")            // longitude
+            .number("(d+)?;")                    // speed
+            .number("(d+);")                     // course
+            .number("(d+);")                     // altitude
+            .number("(d+.d+)")                   // hdop
+            .number("(?:;d+.d+)?")               // vdop
+            .expression(",?")
+            .groupEnd()
+            .groupBegin()
+            .text("GSM:")
+            .number("d+;")                       // registration
+            .number("d+;")                       // gsm signal
+            .number("(d+);")                     // mcc
+            .number("(d+);")                     // mnc
+            .number("(x+);")                     // lac
+            .number("(x+);")                     // cid
+            .number("-d+")                       // rssi
+            .expression("[^,]*,?")
+            .groupEnd("?")
+            .groupBegin()
+            .text("COT:")
+            .number("(d+)")                      // odometer
+            .number("(?:;d+:d+:d+)?")            // engine hours
+            .expression(",?")
+            .groupEnd("?")
+            .groupBegin()
+            .text("ADC:")
+            .number("(d+.d+);")                  // power
+            .number("(d+.d+),?")                 // battery
+            .groupEnd("?")
+            .groupBegin()
+            .text("DTT:")
+            .number("(x+);")                     // status
+            .expression("[^;]*;")
+            .number("x+;")                       // geo-fence 0-119
+            .number("x+;")                       // geo-fence 120-155
+            .number("x+,?")                      // event status
+            .groupEnd("?")
+            .groupBegin()
+            .text("ETD:").expression("[^,]*,?")
+            .groupEnd("?")
+            .groupBegin()
+            .text("OBD:")
+            .number("(x+),?")
+            .groupEnd("?")
+            .groupBegin()
+            .text("FUL:").expression("[^,]*,?")
+            .groupEnd("?")
+            .groupBegin()
+            .text("TRU:").expression("[^,]*,?")
+            .groupEnd("?")
+            .compile();
+
+    private static final Pattern PATTERN_OLD = new PatternBuilder()
+            .text("*GS")                         // header
+            .number("d+,")                       // protocol version
+            .number("(d+),")                     // imei
+            .text("GPS:")
+            .number("(dd)(dd)(dd);")             // time
+            .number("d;").optional()             // fix type
+            .expression("([AV]);")               // validity
+            .number("([NS])(d+.d+);")            // latitude
+            .number("([EW])(d+.d+);")            // longitude
+            .number("(d+)?;")                    // speed
+            .number("(d+);")                     // course
+            .number("(d+.?d*)").optional()        // hdop
+            .number("(dd)(dd)(dd)")              // date
+            .any()
+            .compile();
+
+    private Position decodePosition(Parser parser, Date time) {
+
+        Position position = new Position();
+        position.setProtocol(getProtocolName());
+        position.setDeviceId(getDeviceId());
+
+        if (time != null) {
+            position.setTime(time);
+        }
+
+        position.set(Event.KEY_EVENT, parser.next());
+
+        position.setValid(parser.next().equals("A"));
+        position.set(Event.KEY_SATELLITES, parser.next());
+
+        position.setLatitude(parser.nextCoordinate(Parser.CoordinateFormat.HEM_DEG));
+        position.setLongitude(parser.nextCoordinate(Parser.CoordinateFormat.HEM_DEG));
+        position.setSpeed(UnitsConverter.knotsFromKph(parser.nextDouble()));
+        position.setCourse(parser.nextDouble());
+        position.setAltitude(parser.nextDouble());
+
+        position.set(Event.KEY_HDOP, parser.next());
+
+        if (parser.hasNext(4)) {
+            position.set(Event.KEY_MCC, parser.nextInt());
+            position.set(Event.KEY_MNC, parser.nextInt());
+            position.set(Event.KEY_LAC, parser.nextInt(16));
+            position.set(Event.KEY_CID, parser.nextInt(16));
+        }
+
+        position.set(Event.KEY_ODOMETER, parser.next());
+        position.set(Event.KEY_POWER, parser.next());
+        position.set(Event.KEY_BATTERY, parser.next());
+
+        String status = parser.next();
+        if (status != null) {
+            position.set(Event.KEY_IGNITION, BitUtil.check(Integer.parseInt(status, 16), 13));
+            position.set(Event.KEY_STATUS, status);
+        }
+
+        if (parser.hasNext()) {
+            position.set("obd", parser.next());
+        }
+
+        return position;
+    }
 
     @Override
     protected Object decode(
-            Channel channel, SocketAddress remoteAddress, Object msg)
-            throws Exception {
+            Channel channel, SocketAddress remoteAddress, Object msg) throws Exception {
 
-        String sentence = (String) msg;
-        
         if (channel != null) {
             channel.write("1234");
         }
 
-        // Parse message
-        Matcher parser = pattern.matcher(sentence);
+        String sentence = (String) msg;
+        Pattern pattern = PATTERN;
+        if (sentence.startsWith("*GS02")) {
+            pattern = PATTERN_OLD;
+        }
+
+        Parser parser = new Parser(pattern, (String) msg);
         if (!parser.matches()) {
             return null;
         }
 
-        // Create new position
-        Position position = new Position();
-        position.setProtocol(getProtocolName());
-
-        Integer index = 1;
-
-        // Get device by IMEI
-        if (!identify(parser.group(index++), channel, remoteAddress)) {
+        if (!identify(parser.next(), channel, remoteAddress)) {
             return null;
         }
-        position.setDeviceId(getDeviceId());
 
-        // Date
-        Calendar time = Calendar.getInstance(TimeZone.getTimeZone("UTC"));
-        time.clear();
-        time.set(Calendar.HOUR_OF_DAY, Integer.valueOf(parser.group(index++)));
-        time.set(Calendar.MINUTE, Integer.valueOf(parser.group(index++)));
-        time.set(Calendar.SECOND, Integer.valueOf(parser.group(index++)));
-        time.set(Calendar.DAY_OF_MONTH, Integer.valueOf(parser.group(index++)));
-        time.set(Calendar.MONTH, Integer.valueOf(parser.group(index++)) - 1);
-        time.set(Calendar.YEAR, 2000 + Integer.valueOf(parser.group(index++)));
-        position.setTime(time.getTime());
+        if (pattern == PATTERN_OLD) {
 
-        // Validity
-        position.setValid(parser.group(index++).compareTo("A") == 0);
+            Position position = new Position();
+            position.setProtocol(getProtocolName());
+            position.setDeviceId(getDeviceId());
 
-        // Latitude
-        String hemisphere = parser.group(index++);
-        Double latitude = Double.valueOf(parser.group(index++));
-        if (hemisphere.compareTo("S") == 0) latitude = -latitude;
-        position.setLatitude(latitude);
+            DateBuilder dateBuilder = new DateBuilder()
+                    .setTime(parser.nextInt(), parser.nextInt(), parser.nextInt());
 
-        // Longitude
-        hemisphere = parser.group(index++);
-        Double longitude = Double.valueOf(parser.group(index++));
-        if (hemisphere.compareTo("W") == 0) longitude = -longitude;
-        position.setLongitude(longitude);
+            position.setValid(parser.next().equals("A"));
+            position.setLatitude(parser.nextCoordinate(Parser.CoordinateFormat.HEM_DEG));
+            position.setLongitude(parser.nextCoordinate(Parser.CoordinateFormat.HEM_DEG));
+            position.setSpeed(parser.nextDouble());
+            position.setCourse(parser.nextDouble());
 
-        // Other
-        position.setSpeed(Double.valueOf(parser.group(index++)));
-        position.setCourse(Double.valueOf(parser.group(index++)));
-        position.setAltitude(Double.valueOf(parser.group(index++)));
-        position.set(Event.KEY_HDOP, parser.group(index++));
+            position.set(Event.KEY_HDOP, parser.next());
 
-        return position;
+            dateBuilder.setDateReverse(parser.nextInt(), parser.nextInt(), parser.nextInt());
+            position.setTime(dateBuilder.getDate());
+
+            return position;
+
+        } else {
+
+            Date time = null;
+            if (parser.hasNext(6)) {
+                DateBuilder dateBuilder = new DateBuilder()
+                        .setTime(parser.nextInt(), parser.nextInt(), parser.nextInt())
+                        .setDateReverse(parser.nextInt(), parser.nextInt(), parser.nextInt());
+                time = dateBuilder.getDate();
+            }
+
+            List<Position> positions = new LinkedList<>();
+            Parser itemParser = new Parser(PATTERN_ITEM, parser.next());
+            while (itemParser.find()) {
+                positions.add(decodePosition(itemParser, time));
+            }
+
+            return positions;
+
+        }
     }
 
 }

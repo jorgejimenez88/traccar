@@ -15,50 +15,75 @@
  */
 package org.traccar.geocode;
 
-import org.traccar.helper.Log;
+import com.ning.http.client.AsyncCompletionHandler;
+import com.ning.http.client.Response;
+import org.traccar.Context;
 
 import javax.json.Json;
 import javax.json.JsonObject;
 import javax.json.JsonReader;
-import java.io.InputStreamReader;
-import java.io.Reader;
-import java.net.HttpURLConnection;
-import java.net.URL;
-import java.net.URLConnection;
+import java.util.AbstractMap;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 public abstract class JsonReverseGeocoder implements ReverseGeocoder {
 
     private final String url;
 
-    public JsonReverseGeocoder(String url) {
+    private Map<Map.Entry<Double, Double>, String> cache;
+
+    public JsonReverseGeocoder(String url, final int cacheSize) {
         this.url = url;
+        if (cacheSize > 0) {
+            this.cache = Collections.synchronizedMap(new LinkedHashMap<Map.Entry<Double, Double>, String>() {
+                @Override
+                protected boolean removeEldestEntry(Map.Entry eldest) {
+                    return size() > cacheSize;
+                }
+            });
+        }
     }
 
     @Override
-    public String getAddress(AddressFormat format, double latitude, double longitude) {
+    public void getAddress(
+            final AddressFormat format, final double latitude,
+            final double longitude, final ReverseGeocoderCallback callback) {
 
-        try {
-            HttpURLConnection conn = (HttpURLConnection) new URL(String.format(url, latitude, longitude)).openConnection();
-            conn.setRequestProperty("Connection", "close"); // don't keep-alive connections
-            try {
-                InputStreamReader streamReader = new InputStreamReader(conn.getInputStream());
-                try (JsonReader reader = Json.createReader(streamReader)) {
-                    Address address = parseAddress(reader.readObject());
-                    while (streamReader.read() > 0); // make sure we reached the end
-                    if (address != null) {
-                        return format.format(address);
-                    }
-                }
-            } finally {
-                conn.disconnect();
+        if (cache != null) {
+            String cachedAddress = cache.get(new AbstractMap.SimpleImmutableEntry<>(latitude, longitude));
+            if (cachedAddress != null) {
+                callback.onResult(cachedAddress);
+                return;
             }
-        } catch(Exception error) {
-            Log.warning(error);
         }
 
-        return null;
+        Context.getAsyncHttpClient().prepareGet(String.format(url, latitude, longitude))
+                .execute(new AsyncCompletionHandler() {
+            @Override
+            public Object onCompleted(Response response) throws Exception {
+                try (JsonReader reader = Json.createReader(response.getResponseBodyAsStream())) {
+                    Address address = parseAddress(reader.readObject());
+                    if (address != null) {
+                        String formattedAddress = format.format(address);
+                        if (cache != null) {
+                            cache.put(new AbstractMap.SimpleImmutableEntry<>(latitude, longitude), formattedAddress);
+                        }
+                        callback.onResult(formattedAddress);
+                    } else {
+                        callback.onResult(null);
+                    }
+                }
+                return null;
+            }
+
+            @Override
+            public void onThrowable(Throwable t) {
+                callback.onResult(null);
+            }
+        });
     }
 
-    protected abstract Address parseAddress(JsonObject json);
+    public abstract Address parseAddress(JsonObject json);
 
 }

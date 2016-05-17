@@ -18,14 +18,12 @@ package org.traccar.protocol;
 import org.jboss.netty.buffer.ChannelBuffer;
 import org.jboss.netty.buffer.ChannelBuffers;
 import org.jboss.netty.channel.Channel;
-import org.jboss.netty.channel.ChannelHandlerContext;
 import org.traccar.BaseProtocolDecoder;
+import org.traccar.helper.DateBuilder;
 import org.traccar.model.Event;
 import org.traccar.model.Position;
 
 import java.net.SocketAddress;
-import java.util.Calendar; 
-import java.util.TimeZone;
 
 public class Avl301ProtocolDecoder extends BaseProtocolDecoder {
 
@@ -45,9 +43,9 @@ public class Avl301ProtocolDecoder extends BaseProtocolDecoder {
         return imei.toString();
     }
 
-    private static final int MSG_LOGIN = 'L';
-    private static final int MSG_STATUS = 'H';
-    private static final int MSG_GPS_LBS_STATUS = '$';
+    public static final int MSG_LOGIN = 'L';
+    public static final int MSG_STATUS = 'H';
+    public static final int MSG_GPS_LBS_STATUS = '$';
 
     private static void sendResponse(Channel channel, int type) {
         if (channel != null) {
@@ -62,8 +60,7 @@ public class Avl301ProtocolDecoder extends BaseProtocolDecoder {
 
     @Override
     protected Object decode(
-            Channel channel, SocketAddress remoteAddress, Object msg)
-            throws Exception {
+            Channel channel, SocketAddress remoteAddress, Object msg) throws Exception {
 
         ChannelBuffer buf = (ChannelBuffer) msg;
 
@@ -73,7 +70,7 @@ public class Avl301ProtocolDecoder extends BaseProtocolDecoder {
 
         if (type == MSG_LOGIN) {
 
-            if (identify(readImei(buf), channel)) {
+            if (identify(readImei(buf), channel, remoteAddress)) {
                 sendResponse(channel, type);
             }
 
@@ -83,41 +80,33 @@ public class Avl301ProtocolDecoder extends BaseProtocolDecoder {
 
         } else if (hasDeviceId() && type == MSG_GPS_LBS_STATUS) {
 
-            // Create new position
             Position position = new Position();
             position.setDeviceId(getDeviceId());
             position.setProtocol(getProtocolName());
 
-            // Date and time(6)
-            Calendar time = Calendar.getInstance(TimeZone.getTimeZone("UTC"));
-            time.clear();
-            time.set(Calendar.YEAR, 2000 + buf.readUnsignedByte());
-            time.set(Calendar.MONTH, buf.readUnsignedByte() - 1);
-            time.set(Calendar.DAY_OF_MONTH, buf.readUnsignedByte());
-            time.set(Calendar.HOUR_OF_DAY, buf.readUnsignedByte());
-            time.set(Calendar.MINUTE, buf.readUnsignedByte());
-            time.set(Calendar.SECOND, buf.readUnsignedByte());
-            position.setTime(time.getTime());
+            DateBuilder dateBuilder = new DateBuilder()
+                    .setDate(buf.readUnsignedByte(), buf.readUnsignedByte(), buf.readUnsignedByte())
+                    .setTime(buf.readUnsignedByte(), buf.readUnsignedByte(), buf.readUnsignedByte());
+            position.setTime(dateBuilder.getDate());
 
-            // GPS length and Satellites count
-            int gpsLength = buf.readUnsignedByte();
+            int gpsLength = buf.readUnsignedByte(); // gps len and sat
             position.set(Event.KEY_SATELLITES, gpsLength & 0xf);
-            gpsLength >>= 4;
 
-            //Skip Satellite numbers
-            buf.skipBytes(1);
+            buf.readUnsignedByte(); // satellites
 
-            // Location
             double latitude = buf.readUnsignedInt() / 600000.0;
             double longitude = buf.readUnsignedInt() / 600000.0;
-            position.setSpeed(buf.readUnsignedByte() * 1.0); // kph?
+            position.setSpeed(buf.readUnsignedByte());
 
-            // Course and flags
-            int union = buf.readUnsignedShort();
+            int union = buf.readUnsignedShort(); // course and flags
             position.setCourse(union & 0x03FF);
             position.setValid((union & 0x1000) != 0);
-            if ((union & 0x0400) != 0) latitude = -latitude;
-            if ((union & 0x0800) != 0) longitude = -longitude;
+            if ((union & 0x0400) != 0) {
+                latitude = -latitude;
+            }
+            if ((union & 0x0800) != 0) {
+                longitude = -longitude;
+            }
 
             position.setLatitude(latitude);
             position.setLongitude(longitude);
@@ -127,15 +116,16 @@ public class Avl301ProtocolDecoder extends BaseProtocolDecoder {
             }
 
             position.set(Event.KEY_LAC, buf.readUnsignedShort());
-            position.set(Event.KEY_CELL, buf.readUnsignedMedium());
+            position.set(Event.KEY_CID, buf.readUnsignedMedium());
             position.set(Event.KEY_ALARM, true);
             int flags = buf.readUnsignedByte();
             position.set("acc", (flags & 0x2) != 0);
 
-            // TODO parse other flags
+            // parse other flags
 
             position.set(Event.KEY_POWER, buf.readUnsignedByte());
             position.set(Event.KEY_GSM, buf.readUnsignedByte());
+
             return position;
         }
 

@@ -2,12 +2,13 @@ package org.traccar.protocol;
 
 import org.junit.Assert;
 import org.junit.Test;
+import org.traccar.ProtocolTest;
 import org.traccar.model.Command;
 
-public class Gps103ProtocolEncoderTest {
+public class Gps103ProtocolEncoderTest extends ProtocolTest {
 
     @Test
-    public void testDecode() throws Exception {
+    public void testEncode() throws Exception {
 
         Gps103ProtocolEncoder encoder = new Gps103ProtocolEncoder();
         

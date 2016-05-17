@@ -1,15 +1,13 @@
 package org.traccar.protocol;
 
-import org.jboss.netty.buffer.ChannelBuffers;
-import org.junit.Assert;
 import org.junit.Test;
-import org.traccar.helper.ChannelBufferTools;
+import org.traccar.ProtocolTest;
 import org.traccar.model.Command;
 
-public class Gt06ProtocolEncoderTest {
+public class Gt06ProtocolEncoderTest extends ProtocolTest {
 
     @Test
-    public void testDecode() throws Exception {
+    public void testEncode() throws Exception {
 
         Gt06ProtocolEncoder encoder = new Gt06ProtocolEncoder();
         
@@ -17,8 +15,7 @@ public class Gt06ProtocolEncoderTest {
         command.setDeviceId(1);
         command.setType(Command.TYPE_ENGINE_STOP);
 
-        Assert.assertEquals(encoder.encodeCommand(command), ChannelBuffers.wrappedBuffer(ChannelBufferTools.convertHexString(
-                "787815800b000000004459442c303030303030230000f5010d0a")));
+        verifyCommand(encoder, command, binary("787812800c0000000052656c61792c312300009dee0d0a"));
 
     }
 

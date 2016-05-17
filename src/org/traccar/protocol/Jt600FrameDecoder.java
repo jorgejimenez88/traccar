@@ -15,45 +15,37 @@
  */
 package org.traccar.protocol;
 
-import java.text.ParseException;
 import org.jboss.netty.buffer.ChannelBuffer;
 import org.jboss.netty.channel.Channel;
 import org.jboss.netty.channel.ChannelHandlerContext;
 import org.jboss.netty.handler.codec.frame.FrameDecoder;
-import org.traccar.helper.ChannelBufferTools;
+
+import java.text.ParseException;
 
 public class Jt600FrameDecoder extends FrameDecoder {
 
     @Override
     protected Object decode(
-            ChannelHandlerContext ctx,
-            Channel channel,
-            ChannelBuffer buf) throws Exception {
+            ChannelHandlerContext ctx, Channel channel, ChannelBuffer buf) throws Exception {
 
-        // Check minimum length
-        int available = buf.readableBytes();
-        if (available < 10) {
+        if (buf.readableBytes() < 10) {
             return null;
         }
-        
-        // Message identifier
-        char first = (char) buf.getByte(buf.readerIndex());
-        
-        if (first == '$') {
-            // Check length
+
+        char type = (char) buf.getByte(buf.readerIndex());
+
+        if (type == '$') {
             int length = buf.getUnsignedShort(buf.readerIndex() + 7) + 10;
-            if (length >= available) {
+            if (length >= buf.readableBytes()) {
                 return buf.readBytes(length);
             }
-        } else if (first == '(') {
-            // Find ending
-            Integer endIndex = ChannelBufferTools.find(buf, buf.readerIndex(), available, ")");
-            if (endIndex != null) {
+        } else if (type == '(') {
+            int endIndex = buf.indexOf(buf.readerIndex(), buf.writerIndex(), (byte) ')');
+            if (endIndex != -1) {
                 return buf.readBytes(endIndex + 1);
             }
         } else {
-            // Unknown message
-            throw new ParseException(null, 0);
+            throw new ParseException(null, 0); // unknown message
         }
 
         return null;

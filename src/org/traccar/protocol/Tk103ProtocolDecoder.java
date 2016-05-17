@@ -1,5 +1,5 @@
 /*
- * Copyright 2012 - 2014 Anton Tananaev (anton.tananaev@gmail.com)
+ * Copyright 2012 - 2015 Anton Tananaev (anton.tananaev@gmail.com)
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,17 +15,19 @@
  */
 package org.traccar.protocol;
 
-import java.net.SocketAddress;
-import java.util.Calendar; 
-import java.util.TimeZone;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import org.jboss.netty.channel.Channel;
 import org.traccar.BaseProtocolDecoder;
 import org.traccar.Context;
+import org.traccar.helper.BitUtil;
+import org.traccar.helper.DateBuilder;
+import org.traccar.helper.Parser;
+import org.traccar.helper.PatternBuilder;
 import org.traccar.helper.UnitsConverter;
 import org.traccar.model.Event;
 import org.traccar.model.Position;
+
+import java.net.SocketAddress;
+import java.util.regex.Pattern;
 
 public class Tk103ProtocolDecoder extends BaseProtocolDecoder {
 
@@ -33,27 +35,49 @@ public class Tk103ProtocolDecoder extends BaseProtocolDecoder {
         super(protocol);
     }
 
-    //088048003342 BR00 150807 A 1352.9871 N 10030.9084 E 000.0 110718 000.0 001010000 L00000000
-    private static final Pattern pattern = Pattern.compile(
-            "(\\d+)(,)?" +                 // Device ID
-            ".{4},?" +                     // Command
-            "\\d*" +                       // IMEI (?)
-            "(\\d{2})(\\d{2})(\\d{2}),?" + // Date (YYMMDD)
-            "([AV]),?" +                   // Validity
-            "(\\d{2})(\\d{2}\\.\\d+)" +    // Latitude (DDMM.MMMM)
-            "([NS]),?" +
-            "(\\d{3})(\\d{2}\\.\\d+)" +    // Longitude (DDDMM.MMMM)
-            "([EW]),?" +
-            "(\\d+\\.\\d)(?:\\d*,)?" +     // Speed
-            "(\\d{2})(\\d{2})(\\d{2}),?" + // Time (HHMMSS)
-            "(\\d+\\.?\\d),?" +            // Course
-            "([0-9a-fA-F]{8})?,?" +        // State
-            "(?:L([0-9a-fA-F]+))?.*\\)?"); // Odometer
+    private static final Pattern PATTERN = new PatternBuilder()
+            .number("(d+)(,)?")                  // device id
+            .expression(".{4},?")                // command
+            .number("d*")                        // imei?
+            .number("(dd)(dd)(dd),?")            // date
+            .expression("([AV]),?")              // validity
+            .number("(dd)(dd.d+)")               // latitude
+            .expression("([NS]),?")
+            .number("(ddd)(dd.d+)")              // longitude
+            .expression("([EW]),?")
+            .number("(d+.d)(?:d*,)?")            // speed
+            .number("(dd)(dd)(dd),?")            // time
+            .number("(d+.?d{1,2}),?")            // course
+            .number("(?:([01]{8})|(x{8}))?,?")   // state
+            .number("(?:L(x+))?")                // odometer
+            .any()
+            .text(")").optional()
+            .compile();
+
+    private static final Pattern PATTERN_BATTERY = new PatternBuilder()
+            .number("(d+),")                     // device id
+            .text("ZC20,")
+            .number("(dd)(dd)(dd),")             // date (ddmmyy)
+            .number("(dd)(dd)(dd),")             // time
+            .number("d+,")                       // battery level
+            .number("(d+),")                     // battery voltage
+            .number("(d+),")                     // power voltage
+            .number("d+")                        // installed
+            .compile();
+
+    private static final Pattern PATTERN_NETWORK = new PatternBuilder()
+            .number("(d{12})")                   // device id
+            .text("BZ00,")
+            .number("(d+),")                     // mcc
+            .number("(d+),")                     // mnc
+            .number("(x+),")                     // lac
+            .number("(x+),")                     // cid
+            .any()
+            .compile();
 
     @Override
     protected Object decode(
-            Channel channel, SocketAddress remoteAddress, Object msg)
-            throws Exception {
+            Channel channel, SocketAddress remoteAddress, Object msg) throws Exception {
 
         String sentence = (String) msg;
 
@@ -62,7 +86,7 @@ public class Tk103ProtocolDecoder extends BaseProtocolDecoder {
         if (beginIndex != -1) {
             sentence = sentence.substring(beginIndex + 1);
         }
-        
+
         // Send response
         if (channel != null) {
             String id = sentence.substring(0, 12);
@@ -75,75 +99,104 @@ public class Tk103ProtocolDecoder extends BaseProtocolDecoder {
             }
         }
 
-        // Parse message
-        Matcher parser = pattern.matcher(sentence);
+        Position position = new Position();
+        position.setProtocol(getProtocolName());
+
+        Parser parser = new Parser(PATTERN_BATTERY, sentence);
+        if (parser.matches()) {
+            if (!identify(parser.next(), channel, remoteAddress)) {
+                return null;
+            }
+            position.setDeviceId(getDeviceId());
+
+            DateBuilder dateBuilder = new DateBuilder()
+                    .setDateReverse(parser.nextInt(), parser.nextInt(), parser.nextInt())
+                    .setTime(parser.nextInt(), parser.nextInt(), parser.nextInt());
+
+            getLastLocation(position, dateBuilder.getDate());
+
+            int battery = parser.nextInt();
+            if (battery != 65535) {
+                position.set(Event.KEY_BATTERY, battery);
+            }
+
+            int power = parser.nextInt();
+            if (power != 65535) {
+                position.set(Event.KEY_POWER, battery);
+            }
+
+            return position;
+        }
+
+        parser = new Parser(PATTERN_NETWORK, sentence);
+        if (parser.matches()) {
+            if (!identify(parser.next(), channel, remoteAddress)) {
+                return null;
+            }
+            position.setDeviceId(getDeviceId());
+
+            getLastLocation(position, null);
+
+            position.set(Event.KEY_MCC, parser.nextInt());
+            position.set(Event.KEY_MNC, parser.nextInt());
+            position.set(Event.KEY_LAC, parser.nextInt(16));
+            position.set(Event.KEY_CID, parser.nextInt(16));
+
+            return position;
+        }
+
+        parser = new Parser(PATTERN, sentence);
         if (!parser.matches()) {
             return null;
         }
 
-        // Create new position
-        Position position = new Position();
-        position.setProtocol(getProtocolName());
-        Integer index = 1;
-
-        // Get device by IMEI
-        if (!identify(parser.group(index++), channel)) {
+        if (!identify(parser.next(), channel, remoteAddress)) {
             return null;
         }
         position.setDeviceId(getDeviceId());
 
-        // Date
-        Calendar time = Calendar.getInstance(TimeZone.getTimeZone("UTC"));
-        time.clear();
-        if (parser.group(index++) == null) {
-            time.set(Calendar.YEAR, 2000 + Integer.valueOf(parser.group(index++)));
-            time.set(Calendar.MONTH, Integer.valueOf(parser.group(index++)) - 1);
-            time.set(Calendar.DAY_OF_MONTH, Integer.valueOf(parser.group(index++)));
-        } else {
-            time.set(Calendar.DAY_OF_MONTH, Integer.valueOf(parser.group(index++)));
-            time.set(Calendar.MONTH, Integer.valueOf(parser.group(index++)) - 1);
-            time.set(Calendar.YEAR, 2000 + Integer.valueOf(parser.group(index++)));
+        int alarm = sentence.indexOf("BO01");
+        if (alarm != -1) {
+            position.set(Event.KEY_ALARM, Integer.parseInt(sentence.substring(alarm + 4, alarm + 5)));
         }
 
-        // Validity
-        position.setValid(parser.group(index++).compareTo("A") == 0);
+        DateBuilder dateBuilder = new DateBuilder();
+        if (parser.next() == null) {
+            dateBuilder.setDate(parser.nextInt(), parser.nextInt(), parser.nextInt());
+        } else {
+            dateBuilder.setDateReverse(parser.nextInt(), parser.nextInt(), parser.nextInt());
+        }
 
-        // Latitude
-        Double latitude = Double.valueOf(parser.group(index++));
-        latitude += Double.valueOf(parser.group(index++)) / 60;
-        if (parser.group(index++).compareTo("S") == 0) latitude = -latitude;
-        position.setLatitude(latitude);
+        position.setValid(parser.next().equals("A"));
+        position.setLatitude(parser.nextCoordinate());
+        position.setLongitude(parser.nextCoordinate());
 
-        // Longitude
-        Double longitude = Double.valueOf(parser.group(index++));
-        longitude += Double.valueOf(parser.group(index++)) / 60;
-        if (parser.group(index++).compareTo("W") == 0) longitude = -longitude;
-        position.setLongitude(longitude);
-
-        // Speed
         if (Context.getConfig().getBoolean(getProtocolName() + ".mph")) {
-            position.setSpeed(UnitsConverter.knotsFromMph(Double.valueOf(parser.group(index++))));
+            position.setSpeed(UnitsConverter.knotsFromMph(parser.nextDouble()));
         } else {
-            position.setSpeed(UnitsConverter.knotsFromKph(Double.valueOf(parser.group(index++))));
+            position.setSpeed(UnitsConverter.knotsFromKph(parser.nextDouble()));
         }
 
-        // Time
-        time.set(Calendar.HOUR_OF_DAY, Integer.valueOf(parser.group(index++)));
-        time.set(Calendar.MINUTE, Integer.valueOf(parser.group(index++)));
-        time.set(Calendar.SECOND, Integer.valueOf(parser.group(index++)));
-        position.setTime(time.getTime());
+        dateBuilder.setTime(parser.nextInt(), parser.nextInt(), parser.nextInt());
+        position.setTime(dateBuilder.getDate());
 
-        // Course
-        position.setCourse(Double.valueOf(parser.group(index++)));
-        
-        // State
-        position.set(Event.KEY_STATUS, parser.group(index++));
+        position.setCourse(parser.nextDouble());
 
-        // Odometer
-        String odometer = parser.group(index++);
-        if (odometer != null) {
-            position.set(Event.KEY_ODOMETER, Long.parseLong(odometer, 16));
+        // Status
+        String status = parser.next();
+        if (status != null) {
+            position.set(Event.KEY_STATUS, status); // binary status
+
+            int value = Integer.parseInt(new StringBuilder(status).reverse().toString(), 2);
+            position.set(Event.KEY_CHARGE, !BitUtil.check(value, 0));
+            position.set(Event.KEY_IGNITION, BitUtil.check(value, 1));
         }
+        position.set(Event.KEY_STATUS, parser.next()); // hex status
+
+        if (parser.hasNext()) {
+            position.set(Event.KEY_ODOMETER, parser.nextLong(16));
+        }
+
         return position;
     }
 

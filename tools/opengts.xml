@@ -7,10 +7,7 @@
     <!-- SERVER CONFIG -->
 
     <entry key='web.enable'>false</entry>
-
     <entry key='geocoder.enable'>false</entry>
-    <entry key='geocoder.type'>google</entry>
-
     <entry key='logger.enable'>false</entry>
 
     <!-- DATABASE CONFIG -->
@@ -26,10 +23,10 @@
 
     <entry key='database.insertPosition'>
         START TRANSACTION;
-            UPDATE Device SET lastValidLatitude = :latitude, lastValidLongitude = :longitude, lastGPSTimestamp = UNIX_TIMESTAMP(:time), lastUpdateTime = UNIX_TIMESTAMP(NOW()) WHERE imeiNumber = SUBSTRING(CAST(:deviceId AS CHAR(32)), 2);
+            UPDATE Device SET lastValidLatitude = :latitude, lastValidLongitude = :longitude, lastGPSTimestamp = UNIX_TIMESTAMP(:fixTime), lastUpdateTime = UNIX_TIMESTAMP(NOW()) WHERE imeiNumber = SUBSTRING(CAST(:deviceId AS CHAR(32)), 2);
             SELECT @accountID := accountID, @deviceID := deviceID FROM Device WHERE imeiNumber = SUBSTRING(CAST(:deviceId AS CHAR(32)), 2);
             INSERT INTO EventData (accountID, deviceID, timestamp, statusCode, latitude, longitude, speedKPH, heading, altitude, rawData, creationTime, address)
-            VALUES (@accountID, @deviceID, UNIX_TIMESTAMP(:time), 0, :latitude, :longitude, :speed * 1.852, :course, :altitude, '', UNIX_TIMESTAMP(NOW()), :address);
+            VALUES (@accountID, @deviceID, UNIX_TIMESTAMP(:fixTime), 0, :latitude, :longitude, :speed * 1.852, :course, :altitude, '', UNIX_TIMESTAMP(NOW()), :address);
         COMMIT;
     </entry>
 
@@ -124,5 +121,28 @@
     <entry key='tytan.port'>5084</entry>
     <entry key='avl301.port'>5085</entry>
     <entry key='castel.port'>5086</entry>
+    <entry key='mxt.port'>5087</entry>
+    <entry key='cityeasy.port'>5088</entry>
+    <entry key='aquila.port'>5089</entry>
+    <entry key='flextrack.port'>5090</entry>
+    <entry key='blackkite.port'>5091</entry>
+    <entry key='adm.port'>5092</entry>
+    <entry key='watch.port'>5093</entry>
+    <entry key='t800x.port'>5094</entry>
+    <entry key='upro.port'>5095</entry>
+    <entry key='auro.port'>5096</entry>
+    <entry key='disha.port'>5097</entry>
+    <entry key='thinkrace.port'>5098</entry>
+    <entry key='pathaway.port'>5099</entry>
+    <entry key='arnavi.port'>5100</entry>
+    <entry key='nvs.port'>5101</entry>
+    <entry key='kenji.port'>5102</entry>
+    <entry key='astra.port'>5103</entry>
+    <entry key='homtecs.port'>5104</entry>
+    <entry key='fox.port'>5105</entry>
+    <entry key='gnx.port'>5106</entry>
+    <entry key='arknav.port'>5107</entry>
+    <entry key='supermate.port'>5108</entry>
+    <entry key='appello.port'>5109</entry>
 
 </properties>

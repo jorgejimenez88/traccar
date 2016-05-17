@@ -1,5 +1,5 @@
 /*
- * Copyright 2012 - 2015 Anton Tananaev (anton.tananaev@gmail.com)
+ * Copyright 2012 - 2016 Anton Tananaev (anton.tananaev@gmail.com)
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,15 +19,12 @@ import java.io.File;
 import java.net.URI;
 import java.net.URL;
 import java.net.URLDecoder;
-import java.sql.SQLException;
+import java.nio.charset.StandardCharsets;
 import java.util.Enumeration;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
-import org.jboss.netty.bootstrap.ConnectionlessBootstrap;
-import org.jboss.netty.bootstrap.ServerBootstrap;
-import org.jboss.netty.channel.ChannelPipeline;
 
 public class ServerManager {
 
@@ -41,44 +38,45 @@ public class ServerManager {
         URL packageUrl = Thread.currentThread().getContextClassLoader().getResource(packagePath);
 
         if (packageUrl.getProtocol().equals("jar")) {
-            String jarFileName = URLDecoder.decode(packageUrl.getFile(), "UTF-8");
-            JarFile jf = new JarFile(jarFileName.substring(5, jarFileName.indexOf("!")));
-            
-            Enumeration<JarEntry> jarEntries = jf.entries();
-            while(jarEntries.hasMoreElements()){
-                String entryName = jarEntries.nextElement().getName();
-                if (entryName.startsWith(packagePath) && entryName.length() > packagePath.length() + 5) {
-                    names.add(entryName.substring(packagePath.length() + 1, entryName.lastIndexOf('.')));
+            String jarFileName = URLDecoder.decode(packageUrl.getFile(), StandardCharsets.UTF_8.name());
+            try (JarFile jf = new JarFile(jarFileName.substring(5, jarFileName.indexOf("!")))) {
+                Enumeration<JarEntry> jarEntries = jf.entries();
+                while (jarEntries.hasMoreElements()) {
+                    String entryName = jarEntries.nextElement().getName();
+                    if (entryName.startsWith(packagePath) && entryName.length() > packagePath.length() + 5) {
+                        names.add(entryName.substring(packagePath.length() + 1, entryName.lastIndexOf('.')));
+                    }
                 }
             }
         } else {
             File folder = new File(new URI(packageUrl.toString()));
             File[] files = folder.listFiles();
-            for (File actual: files) {
-                String entryName = actual.getName();
-                names.add(entryName.substring(0, entryName.lastIndexOf('.')));
+            if (files != null) {
+                for (File actual: files) {
+                    String entryName = actual.getName();
+                    names.add(entryName.substring(0, entryName.lastIndexOf('.')));
+                }
             }
         }
-        
+
         for (String name : names) {
             Class protocolClass = Class.forName(packageName + '.' + name);
             if (BaseProtocol.class.isAssignableFrom(protocolClass)) {
-                initProtocolServer((BaseProtocol) protocolClass.newInstance());
+                BaseProtocol baseProtocol = (BaseProtocol) protocolClass.newInstance();
+                initProtocolServer(baseProtocol);
             }
         }
-
-        initProtocolDetector();
     }
 
     public void start() {
-        for (Object server: serverList) {
-            ((TrackerServer) server).start();
+        for (TrackerServer server: serverList) {
+            server.start();
         }
     }
 
     public void stop() {
-        for (Object server: serverList) {
-            ((TrackerServer) server).stop();
+        for (TrackerServer server: serverList) {
+            server.stop();
         }
 
         // Release resources
@@ -86,30 +84,8 @@ public class ServerManager {
         GlobalTimer.release();
     }
 
-    private boolean isProtocolEnabled(String protocol) {
-        return Context.getConfig().hasKey(protocol + ".port");
-    }
-
-    private void initProtocolDetector() throws SQLException {
-        String protocol = "detector";
-        if (isProtocolEnabled(protocol)) {
-            serverList.add(new TrackerServer(new ServerBootstrap(), protocol) {
-                @Override
-                protected void addSpecificHandlers(ChannelPipeline pipeline) {
-                    pipeline.addLast("detectorHandler", new DetectorHandler(serverList));
-                }
-            });
-            serverList.add(new TrackerServer(new ConnectionlessBootstrap(), protocol) {
-                @Override
-                protected void addSpecificHandlers(ChannelPipeline pipeline) {
-                    pipeline.addLast("detectorHandler", new DetectorHandler(serverList));
-                }
-            });
-        }
-    }
-
-    private void initProtocolServer(final Protocol protocol) throws SQLException {
-        if (isProtocolEnabled(protocol.getName())) {
+    private void initProtocolServer(final Protocol protocol) {
+        if (Context.getConfig().hasKey(protocol.getName() + ".port")) {
             protocol.initTrackerServers(serverList);
         }
     }

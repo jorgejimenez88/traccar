@@ -17,10 +17,11 @@ package org.traccar.helper;
 
 import javax.crypto.SecretKeyFactory;
 import javax.crypto.spec.PBEKeySpec;
+import javax.xml.bind.DatatypeConverter;
 import java.security.GeneralSecurityException;
 import java.security.SecureRandom;
 
-public class Hashing {
+public final class Hashing {
 
     public static final int ITERATIONS = 1000;
     public static final int SALT_SIZE = 24;
@@ -28,13 +29,24 @@ public class Hashing {
 
     public static class HashingResult {
 
-        public final String hash;
-        public final String salt;
+        private final String hash;
+        private final String salt;
 
         public HashingResult(String hash, String salt) {
             this.hash = hash;
             this.salt = salt;
         }
+
+        public String getHash() {
+            return hash;
+        }
+
+        public String getSalt() {
+            return salt;
+        }
+    }
+
+    private Hashing() {
     }
 
     private static byte[] function(char[] password, byte[] salt) {
@@ -47,19 +59,20 @@ public class Hashing {
         }
     }
 
-    private static SecureRandom random = new SecureRandom();
+    private static final SecureRandom RANDOM = new SecureRandom();
 
     public static HashingResult createHash(String password) {
-        byte[] salt = new byte[SALT_SIZE]; random.nextBytes(salt);
+        byte[] salt = new byte[SALT_SIZE];
+        RANDOM.nextBytes(salt);
         byte[] hash = function(password.toCharArray(), salt);
         return new HashingResult(
-                ChannelBufferTools.convertByteArray(hash),
-                ChannelBufferTools.convertByteArray(salt));
+                DatatypeConverter.printHexBinary(hash),
+                DatatypeConverter.printHexBinary(salt));
     }
 
     public static boolean validatePassword(String password, String hashHex, String saltHex) {
-        byte[] hash = ChannelBufferTools.convertHexString(hashHex);
-        byte[] salt = ChannelBufferTools.convertHexString(saltHex);
+        byte[] hash = DatatypeConverter.parseHexBinary(hashHex);
+        byte[] salt = DatatypeConverter.parseHexBinary(saltHex);
         return slowEquals(hash, function(password.toCharArray(), salt));
     }
 

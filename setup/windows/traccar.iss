@@ -1,6 +1,6 @@
 [Setup]
 AppName=Traccar
-AppVersion=3.1
+AppVersion=3.5
 DefaultDirName={pf}\Traccar
 AlwaysRestart=yes
 
@@ -23,6 +23,7 @@ Source: "..\wrapper\src\conf\wrapper.conf.in"; DestDir: "{app}\conf"; DestName: 
 
 Source: "..\..\target\tracker-server.jar"; DestDir: "{app}"
 Source: "..\..\target\lib\*"; DestDir: "{app}\lib"
+Source: "..\..\database\*"; DestDir: "{app}\data"
 Source: "..\..\web\*"; DestDir: "{app}\web"; Flags: recursesubdirs
 Source: "traccar.xml"; DestDir: "{app}\conf"; AfterInstall: ConfigureApplication
 
@@ -65,6 +66,7 @@ begin
   LoadStringFromFile(ExpandConstant(CurrentFileName), S);
   Insert('wrapper.java.classpath.2=../tracker-server.jar' + #13#10, S, Pos('wrapper.java.classpath.1', S));
   Insert(ExpandConstant('wrapper.app.parameter.2="{app}\conf\traccar.xml"') + #13#10, S, Pos('wrapper.app.parameter.1', S));
+  StringChangeEx(S, 'wrapper.java.additional.1=', 'wrapper.java.additional.1=-Dfile.encoding=UTF-8', true);
   StringChangeEx(S, '<YourMainClass>', 'org.traccar.Main', true);
   StringChangeEx(S, '@app.name@', 'Traccar', true);
   StringChangeEx(S, '@app.long.name@', 'Traccar', true);
@@ -81,5 +83,6 @@ begin
   StringChangeEx(S, '[WEB]', ExpandConstant('{app}\web'), true);
   StringChangeEx(S, '[LOG]', ExpandConstant('{app}\logs\tracker-server.log'), true);
   StringChangeEx(S, '[DATABASE]', ExpandConstant('{app}\data\database'), true);
+  StringChangeEx(S, '[CHANGELOG]', ExpandConstant('{app}\data\changelog-master.xml'), true);
   SaveStringToFile(ExpandConstant(CurrentFileName), S, false);
 end;

@@ -1,6 +1,6 @@
 /*
- * Copyright 2014 Anton Tananaev (anton.tananaev@gmail.com)
- *                Rohit
+ * Copyright 2014 - 2015 Anton Tananaev (anton.tananaev@gmail.com)
+ * Copyright 2014 Rohit
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,18 +16,16 @@
  */
 package org.traccar.protocol;
 
-import java.net.SocketAddress;
-import java.util.Calendar; 
-import java.util.TimeZone;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-
 import org.jboss.netty.channel.Channel;
-import org.jboss.netty.channel.ChannelHandlerContext;
-
 import org.traccar.BaseProtocolDecoder;
+import org.traccar.helper.DateBuilder;
+import org.traccar.helper.Parser;
+import org.traccar.helper.PatternBuilder;
 import org.traccar.model.Event;
 import org.traccar.model.Position;
+
+import java.net.SocketAddress;
+import java.util.regex.Pattern;
 
 public class CarTrackProtocolDecoder extends BaseProtocolDecoder {
 
@@ -35,100 +33,63 @@ public class CarTrackProtocolDecoder extends BaseProtocolDecoder {
         super(protocol);
     }
 
-    private static final Pattern pattern = Pattern.compile(
-            "\\$\\$" +                                      // Header
-            "(\\d+)\\?*" +                                  // Device ID
-            "\\&A" +
-            "(\\d{4})" +                                    // Command - 2
-            "\\&B" +
-            "(\\d{2})(\\d{2})(\\d{2})\\.(\\d{3})," +        // HHMMSS.DDD
-            "([AV])," +                                     // STATUS : A= Valid, V = Invalid
-            "(\\d{2})(\\d{2}\\.\\d{4})," +                  // Lat : XXMM.DDDDD
-            "([NS])," +                                     // N/S
-            "(\\d{3})(\\d{2}\\.\\d{4})," +                  // Long : YYYMM.DDDD
-            "([EW])," +                                     // E/W
-            "(\\d+.\\d*)?," +                               // Speed in Knots
-            "(\\d+.\\d*)?," +                               // Heading
-            "(\\d{2})(\\d{2})(\\d{2})" +                    // DDMMYY
-            ".*" +
-            "\\&C(.*)" +                                    // IO Port Data
-            "\\&D(.*)" +                                    // Mile Meter Data
-            "\\&E(.*)" +                                    // Alarm Data
-            "(?:\\&Y)?(.*)");                               // AD Input Data
+    private static final Pattern PATTERN = new PatternBuilder()
+            .text("$$")                          // header
+            .number("(d+)")                      // device id
+            .text("?").expression("*")
+            .text("&A")
+            .number("(dddd)")                    // command
+            .text("&B")
+            .number("(dd)(dd)(dd).(ddd),")       // time
+            .expression("([AV]),")               // validity
+            .number("(dd)(dd.dddd),")            // latitude
+            .expression("([NS]),")
+            .number("(ddd)(dd.dddd),")           // longitude
+            .expression("([EW]),")
+            .number("(d+.d*)?,")                 // speed
+            .number("(d+.d*)?,")                 // course
+            .number("(dd)(dd)(dd)")              // date (ddmmyy)
+            .any()
+            .expression("&C([^&]*)")             // io
+            .expression("&D([^&]*)")             // odometer
+            .expression("&E([^&]*)")             // alarm
+            .expression("&Y([^&]*)").optional()  // adc
+            .compile();
 
     @Override
     protected Object decode(
-            Channel channel, SocketAddress remoteAddress, Object msg)
-            throws Exception {
+            Channel channel, SocketAddress remoteAddress, Object msg) throws Exception {
 
-        String sentence = (String) msg;
-        
-        // Parse message
-        Matcher parser = pattern.matcher(sentence);
+        Parser parser = new Parser(PATTERN, (String) msg);
         if (!parser.matches()) {
             return null;
         }
 
-        // Create new position
         Position position = new Position();
         position.setProtocol(getProtocolName());
-        Integer index = 1;
 
-        // Get device by unique identifier
-        if (!identify(parser.group(index++), channel)) {
+        if (!identify(parser.next(), channel, remoteAddress)) {
             return null;
         }
         position.setDeviceId(getDeviceId());
 
-        // Command
-        position.set("command", parser.group(index++));
+        position.set("command", parser.next());
 
-        // Time
-        Calendar time = Calendar.getInstance(TimeZone.getTimeZone("UTC"));
-        time.clear();
-        time.set(Calendar.HOUR_OF_DAY, Integer.valueOf(parser.group(index++)));
-        time.set(Calendar.MINUTE, Integer.valueOf(parser.group(index++)));
-        time.set(Calendar.SECOND, Integer.valueOf(parser.group(index++)));
-        time.set(Calendar.MILLISECOND, Integer.valueOf(parser.group(index++)));
-        
-        // Validity
-        position.setValid(parser.group(index++).compareTo("A") == 0);
+        DateBuilder dateBuilder = new DateBuilder()
+                .setTime(parser.nextInt(), parser.nextInt(), parser.nextInt(), parser.nextInt());
 
-        // Latitude
-        Double latitude = Double.valueOf(parser.group(index++));
-        latitude += Double.valueOf(parser.group(index++)) / 60;
-        if (parser.group(index++).compareTo("S") == 0) latitude = -latitude;
-        position.setLatitude(latitude);
+        position.setValid(parser.next().equals("A"));
+        position.setLatitude(parser.nextCoordinate());
+        position.setLongitude(parser.nextCoordinate());
+        position.setSpeed(parser.nextDouble());
+        position.setCourse(parser.nextDouble());
 
-        // Longitude
-        Double longitude = Double.valueOf(parser.group(index++));
-        longitude += Double.valueOf(parser.group(index++)) / 60;
-        if (parser.group(index++).compareTo("W") == 0) longitude = -longitude;
-        position.setLongitude(longitude);
+        dateBuilder.setDateReverse(parser.nextInt(), parser.nextInt(), parser.nextInt());
+        position.setTime(dateBuilder.getDate());
 
-        // Speed
-        String speed = parser.group(index++);
-        if (speed != null) {
-            position.setSpeed(Double.valueOf(speed));
-        }
+        position.set(Event.PREFIX_IO + 1, parser.next());
 
-        // Course
-        String course = parser.group(index++);
-        if (course != null) {
-            position.setCourse(Double.valueOf(course));
-        }
-
-        // Date
-        time.set(Calendar.DAY_OF_MONTH, Integer.valueOf(parser.group(index++)));
-        time.set(Calendar.MONTH, Integer.valueOf(parser.group(index++)) - 1);
-        time.set(Calendar.YEAR, 2000 + Integer.valueOf(parser.group(index++)));
-        position.setTime(time.getTime());
-        
-        // State
-        position.set(Event.PREFIX_IO + 1, parser.group(index++));
-
-        // Odometer
-        String odometer = parser.group(index++);
+        String odometer = parser.next();
         odometer = odometer.replace(":", "A");
         odometer = odometer.replace(";", "B");
         odometer = odometer.replace("<", "C");
@@ -137,8 +98,9 @@ public class CarTrackProtocolDecoder extends BaseProtocolDecoder {
         odometer = odometer.replace("?", "F");
         position.set(Event.KEY_ODOMETER, Integer.parseInt(odometer, 16));
 
-        position.set(Event.KEY_ALARM, parser.group(index++));
-        position.set("ad", parser.group(index++));
+        position.set(Event.KEY_ALARM, parser.next());
+        position.set(Event.PREFIX_ADC + 1, parser.next());
+
         return position;
     }
 

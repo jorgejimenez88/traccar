@@ -15,21 +15,19 @@
  */
 package org.traccar.protocol;
 
-import java.net.SocketAddress;
-import java.util.Calendar; 
-import java.util.LinkedList;
-import java.util.List;
-import java.util.TimeZone;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-
 import org.jboss.netty.channel.Channel;
-import org.jboss.netty.channel.ChannelHandlerContext;
-
 import org.traccar.BaseProtocolDecoder;
-import org.traccar.helper.UnitsConverter;
+import org.traccar.helper.DateBuilder;
+import org.traccar.helper.Parser;
+import org.traccar.helper.PatternBuilder;
 import org.traccar.model.Event;
 import org.traccar.model.Position;
+
+import java.net.SocketAddress;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class WialonProtocolDecoder extends BaseProtocolDecoder {
 
@@ -37,25 +35,26 @@ public class WialonProtocolDecoder extends BaseProtocolDecoder {
         super(protocol);
     }
 
-    private static final Pattern pattern = Pattern.compile(
-            "(\\d{2})(\\d{2})(\\d{2});" +  // Date (DDMMYY)
-            "(\\d{2})(\\d{2})(\\d{2});" +  // Time (HHMMSS)
-            "(\\d{2})(\\d{2}\\.\\d+);" +   // Latitude (DDMM.MMMM)
-            "([NS]);" +
-            "(\\d{3})(\\d{2}\\.\\d+);" +   // Longitude (DDDMM.MMMM)
-            "([EW]);" +
-            "(\\d+\\.?\\d*)?;" +           // Speed
-            "(\\d+\\.?\\d*)?;" +           // Course
-            "(?:NA|(\\d+\\.?\\d*));" +     // Altitude
-            "(?:NA|(\\d+))" +              // Satellites
-            "(?:;" +
-            "(?:NA|(\\d+\\.?\\d*));" +     // hdop
-            "(?:NA|(\\d+));" +             // inputs
-            "(?:NA|(\\d+));" +             // outputs
-            "(?:NA|([^;]*));" +            // adc
-            "(?:NA|([^;]*));" +            // ibutton
-            "(?:NA|(.*))" +                // params
-            ")?");
+    private static final Pattern PATTERN = new PatternBuilder()
+            .number("(dd)(dd)(dd);")             // date (ddmmyy)
+            .number("(dd)(dd)(dd);")             // time
+            .number("(dd)(dd.d+);")              // latitude
+            .expression("([NS]);")
+            .number("(ddd)(dd.d+);")             // longitude
+            .expression("([EW]);")
+            .number("(d+.?d*)?;")                // speed
+            .number("(d+.?d*)?;")                // course
+            .number("(?:NA|(d+.?d*));")          // altitude
+            .number("(?:NA|(d+))")               // satellites
+            .groupBegin().text(";")
+            .number("(?:NA|(d+.?d*));")          // hdop
+            .number("(?:NA|(d+));")              // inputs
+            .number("(?:NA|(d+));")              // outputs
+            .expression("(?:NA|([^;]*));")       // adc
+            .expression("(?:NA|([^;]*));")       // ibutton
+            .expression("(?:NA|(.*))")           // params
+            .groupEnd("?")
+            .compile();
 
     private void sendResponse(Channel channel, String prefix, Integer number) {
         if (channel != null) {
@@ -67,95 +66,52 @@ public class WialonProtocolDecoder extends BaseProtocolDecoder {
             channel.write(response.toString());
         }
     }
-    
+
     private Position decodePosition(String substring) {
-        
-        // Parse message
-        Matcher parser = pattern.matcher(substring);
+
+        Parser parser = new Parser(PATTERN, substring);
         if (!hasDeviceId() || !parser.matches()) {
             return null;
         }
 
-        // Create new position
         Position position = new Position();
         position.setProtocol(getProtocolName());
         position.setDeviceId(getDeviceId());
 
-        Integer index = 1;
+        DateBuilder dateBuilder = new DateBuilder()
+                .setDateReverse(parser.nextInt(), parser.nextInt(), parser.nextInt())
+                .setTime(parser.nextInt(), parser.nextInt(), parser.nextInt());
+        position.setTime(dateBuilder.getDate());
 
-        // Date and Time
-        Calendar time = Calendar.getInstance(TimeZone.getTimeZone("UTC"));
-        time.clear();
-        time.set(Calendar.DAY_OF_MONTH, Integer.valueOf(parser.group(index++)));
-        time.set(Calendar.MONTH, Integer.valueOf(parser.group(index++)) - 1);
-        time.set(Calendar.YEAR, 2000 + Integer.valueOf(parser.group(index++)));
-        time.set(Calendar.HOUR_OF_DAY, Integer.valueOf(parser.group(index++)));
-        time.set(Calendar.MINUTE, Integer.valueOf(parser.group(index++)));
-        time.set(Calendar.SECOND, Integer.valueOf(parser.group(index++)));
-        position.setTime(time.getTime());
+        position.setLatitude(parser.nextCoordinate());
+        position.setLongitude(parser.nextCoordinate());
+        position.setSpeed(parser.nextDouble());
+        position.setCourse(parser.nextDouble());
+        position.setAltitude(parser.nextDouble());
 
-        // Latitude
-        Double latitude = Double.valueOf(parser.group(index++));
-        latitude += Double.valueOf(parser.group(index++)) / 60;
-        if (parser.group(index++).compareTo("S") == 0) latitude = -latitude;
-        position.setLatitude(latitude);
-
-        // Longitude
-        Double longitude = Double.valueOf(parser.group(index++));
-        longitude += Double.valueOf(parser.group(index++)) / 60;
-        if (parser.group(index++).compareTo("W") == 0) longitude = -longitude;
-        position.setLongitude(longitude);
-
-        // Speed
-        String speed = parser.group(index++);
-        if (speed != null) {
-            position.setSpeed(UnitsConverter.knotsFromKph(Double.valueOf(speed)));
-        }
-
-        // Course
-        String course = parser.group(index++);
-        if (course != null) {
-            position.setCourse(Double.valueOf(course));
-        }
-
-        // Altitude
-        String altitude = parser.group(index++);
-        if (altitude != null) {
-            position.setAltitude(Double.valueOf(altitude));
-        }
-
-        // Satellites
-        String satellites = parser.group(index++);
-        if (satellites != null) {
-            position.setValid(Integer.valueOf(satellites) >= 3);
+        if (parser.hasNext()) {
+            int satellites = parser.nextInt();
+            position.setValid(satellites >= 3);
             position.set(Event.KEY_SATELLITES, satellites);
-        } else {
-            position.setValid(false);
         }
 
-        // Other
-        position.set(Event.KEY_HDOP, parser.group(index++));
-        position.set(Event.KEY_INPUT, parser.group(index++));
-        position.set(Event.KEY_OUTPUT, parser.group(index++));
+        position.set(Event.KEY_HDOP, parser.next());
+        position.set(Event.KEY_INPUT, parser.next());
+        position.set(Event.KEY_OUTPUT, parser.next());
 
-        // ADC
-        String adc = parser.group(index++);
-        if (adc != null) {
-            String[] values = adc.split(",");
+        if (parser.hasNext()) {
+            String[] values = parser.next().split(",");
             for (int i = 0; i < values.length; i++) {
                 position.set(Event.PREFIX_ADC + (i + 1), values[i]);
             }
         }
 
-        // iButton
-        position.set(Event.KEY_RFID, parser.group(index++));
+        position.set(Event.KEY_RFID, parser.next());
 
-        // Params
-        String params = parser.group(index);
-        if (params != null) {
-            String[] values = params.split(",");
+        if (parser.hasNext()) {
+            String[] values = parser.next().split(",");
             for (String param : values) {
-                Matcher paramParser = Pattern.compile( "(.*):[1-3]:(.*)").matcher(param);
+                Matcher paramParser = Pattern.compile("(.*):[1-3]:(.*)").matcher(param);
                 if (paramParser.matches()) {
                     position.set(paramParser.group(1).toLowerCase(), paramParser.group(2));
                 }
@@ -167,26 +123,22 @@ public class WialonProtocolDecoder extends BaseProtocolDecoder {
 
     @Override
     protected Object decode(
-            Channel channel, SocketAddress remoteAddress, Object msg)
-            throws Exception {
+            Channel channel, SocketAddress remoteAddress, Object msg) throws Exception {
 
         String sentence = (String) msg;
 
-        // Detect device ID
         if (sentence.startsWith("#L#")) {
+
             String imei = sentence.substring(3, sentence.indexOf(';'));
-            if (identify(imei, channel)) {
+            if (identify(imei, channel, remoteAddress)) {
                 sendResponse(channel, "#AL#", 1);
             }
-        }
 
-        // Heartbeat
-        else if (sentence.startsWith("#P#")) {
-            sendResponse(channel, "#AP#", null);
-        }
-        
-        // Parse message
-        else if (sentence.startsWith("#SD#") || sentence.startsWith("#D#")) {
+        } else if (sentence.startsWith("#P#")) {
+
+            sendResponse(channel, "#AP#", null); // heartbeat
+
+        } else if (sentence.startsWith("#SD#") || sentence.startsWith("#D#")) {
 
             Position position = decodePosition(
                     sentence.substring(sentence.indexOf('#', 1) + 1));
@@ -195,10 +147,9 @@ public class WialonProtocolDecoder extends BaseProtocolDecoder {
                 sendResponse(channel, "#AD#", 1);
                 return position;
             }
-        }
-        
-        else if (sentence.startsWith("#B#")) {
-            
+
+        } else if (sentence.startsWith("#B#")) {
+
             String[] messages = sentence.substring(sentence.indexOf('#', 1) + 1).split("\\|");
             List<Position> positions = new LinkedList<>();
 
@@ -213,6 +164,7 @@ public class WialonProtocolDecoder extends BaseProtocolDecoder {
             if (!positions.isEmpty()) {
                 return positions;
             }
+
         }
 
         return null;

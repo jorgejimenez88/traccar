@@ -1,5 +1,5 @@
 /*
- * Copyright 2012 - 2015 Anton Tananaev (anton.tananaev@gmail.com)
+ * Copyright 2012 - 2016 Anton Tananaev (anton.tananaev@gmail.com)
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,10 +15,14 @@
  */
 package org.traccar;
 
-import java.net.SocketAddress;
 import org.jboss.netty.channel.Channel;
 import org.traccar.helper.Log;
 import org.traccar.model.Device;
+import org.traccar.model.Position;
+
+import java.net.InetSocketAddress;
+import java.net.SocketAddress;
+import java.util.Date;
 
 public abstract class BaseProtocolDecoder extends ExtendedObjectDecoder {
 
@@ -31,7 +35,7 @@ public abstract class BaseProtocolDecoder extends ExtendedObjectDecoder {
     private long deviceId;
 
     public boolean hasDeviceId() {
-        return (deviceId != 0);
+        return deviceId != 0;
     }
 
     public long getDeviceId() {
@@ -43,12 +47,16 @@ public abstract class BaseProtocolDecoder extends ExtendedObjectDecoder {
             Device device = Context.getIdentityManager().getDeviceByUniqueId(uniqueId);
             if (device != null) {
                 deviceId = device.getId();
-                Context.getConnectionManager().setActiveDevice(deviceId, protocol, channel, remoteAddress);
+                Context.getConnectionManager().addActiveDevice(deviceId, protocol, channel, remoteAddress);
                 return true;
             } else {
                 deviceId = 0;
                 if (logWarning) {
-                    Log.warning("Unknown device - " + uniqueId);
+                    String message = "Unknown device - " + uniqueId;
+                    if (remoteAddress != null) {
+                        message += " (" + ((InetSocketAddress) remoteAddress).getHostString() + ")";
+                    }
+                    Log.warning(message);
                 }
                 return false;
             }
@@ -63,12 +71,51 @@ public abstract class BaseProtocolDecoder extends ExtendedObjectDecoder {
         return identify(uniqueId, channel, remoteAddress, true);
     }
 
-    public boolean identify(String uniqueId, Channel channel) {
-        return identify(uniqueId, channel, null, true);
-    }
-
     public BaseProtocolDecoder(Protocol protocol) {
         this.protocol = protocol;
+    }
+
+    public void getLastLocation(Position position, Date deviceTime) {
+        position.setOutdated(true);
+
+        Position last = Context.getConnectionManager().getLastPosition(getDeviceId());
+        if (last != null) {
+            position.setFixTime(last.getFixTime());
+            position.setValid(last.getValid());
+            position.setLatitude(last.getLatitude());
+            position.setLongitude(last.getLongitude());
+            position.setAltitude(last.getAltitude());
+            position.setSpeed(last.getSpeed());
+            position.setCourse(last.getCourse());
+        } else {
+            position.setFixTime(new Date(0));
+        }
+
+        if (deviceTime != null) {
+            position.setDeviceTime(deviceTime);
+        } else {
+            position.setDeviceTime(new Date());
+        }
+    }
+
+    @Override
+    protected void onMessageEvent(Channel channel, SocketAddress remoteAddress, Object msg) {
+        if (hasDeviceId()) {
+            Context.getConnectionManager().updateDevice(deviceId, Device.STATUS_ONLINE, new Date());
+        }
+    }
+
+    @Override
+    protected Object handleEmptyMessage(Channel channel, SocketAddress remoteAddress, Object msg) {
+        if (Context.getConfig().getBoolean("database.saveEmpty") && hasDeviceId()) {
+            Position position = new Position();
+            position.setProtocol(getProtocolName());
+            position.setDeviceId(getDeviceId());
+            getLastLocation(position, null);
+            return position;
+        } else {
+            return null;
+        }
     }
 
 }

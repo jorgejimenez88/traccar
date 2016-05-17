@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 - 2014 Anton Tananaev (anton.tananaev@gmail.com)
+ * Copyright 2013 - 2015 Anton Tananaev (anton.tananaev@gmail.com)
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,18 +15,16 @@
  */
 package org.traccar.protocol;
 
-import java.net.SocketAddress;
-import java.util.Calendar; 
-import java.util.TimeZone;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-
 import org.jboss.netty.channel.Channel;
-import org.jboss.netty.channel.ChannelHandlerContext;
-
 import org.traccar.BaseProtocolDecoder;
+import org.traccar.helper.DateBuilder;
+import org.traccar.helper.Parser;
+import org.traccar.helper.PatternBuilder;
 import org.traccar.model.Event;
 import org.traccar.model.Position;
+
+import java.net.SocketAddress;
+import java.util.regex.Pattern;
 
 public class IntellitracProtocolDecoder extends BaseProtocolDecoder {
 
@@ -34,105 +32,89 @@ public class IntellitracProtocolDecoder extends BaseProtocolDecoder {
         super(protocol);
     }
 
-    private static final Pattern pattern = Pattern.compile(
-            "(?:.+,)?(\\d+)," +            // Device Identifier
-            "(\\d{4})(\\d{2})(\\d{2})" +   // Date (YYYYMMDD)
-            "(\\d{2})(\\d{2})(\\d{2})," +  // Time (HHMMSS)
-            "(-?\\d+\\.\\d+)," +           // Longitude
-            "(-?\\d+\\.\\d+)," +           // Latitude
-            "(\\d+\\.?\\d*)," +            // Speed
-            "(\\d+\\.?\\d*)," +            // Course
-            "(-?\\d+\\.?\\d*)," +          // Altitude
-            "(\\d+)," +                    // Satellites
-            "(\\d+)," +                    // Report Identifier
-            "(\\d+)," +                    // Input
-            "(\\d+),?" +                   // Output
-            "(\\d+\\.\\d+)?,?" +           // ADC1
-            "(\\d+\\.\\d+)?,?" +           // ADC2
-            "(?:\\d{14},\\d+," +
-            "(\\d+)," +                    // VSS
-            "(\\d+)," +                    // RPM
-            "(-?\\d+)," +                  // Coolant
-            "(\\d+)," +                    // Fuel
-            "(\\d+)," +                    // Fuel Consumption
-            "(-?\\d+)," +                  // Fuel Temperature
-            "(\\d+)," +                    // Charger Pressure
-            "(\\d+)," +                    // TPL
-            "(\\d+)," +                    // Axle Weight
-            "(\\d+))?" +                   // Odometer
-            ".*");
+    private static final Pattern PATTERN = new PatternBuilder()
+            .expression(".+,").optional()
+            .number("(d+),")                     // identifier
+            .number("(dddd)(dd)(dd)")            // date
+            .number("(dd)(dd)(dd),")             // time
+            .number("(-?d+.d+),")                // longitude
+            .number("(-?d+.d+),")                // latitude
+            .number("(d+.?d*),")                 // speed
+            .number("(d+.?d*),")                 // course
+            .number("(-?d+.?d*),")               // altitude
+            .number("(d+),")                     // satellites
+            .number("(d+),")                     // index
+            .number("(d+),")                     // input
+            .number("(d+),?")                    // output
+            .number("(d+.d+)?,?")                // adc1
+            .number("(d+.d+)?,?")                // adc2
+            .groupBegin()
+            .number("d{14},d+,")
+            .number("(d+),")                     // vss
+            .number("(d+),")                     // rpm
+            .number("(-?d+),")                   // coolant
+            .number("(d+),")                     // fuel
+            .number("(d+),")                     // fuel consumption
+            .number("(-?d+),")                   // fuel temperature
+            .number("(d+),")                     // charger pressure
+            .number("(d+),")                     // tpl
+            .number("(d+),")                     // axle weight
+            .number("(d+)")                      // odometer
+            .groupEnd("?")
+            .any()
+            .compile();
 
     @Override
     protected Object decode(
-            Channel channel, SocketAddress remoteAddress, Object msg)
-            throws Exception {
+            Channel channel, SocketAddress remoteAddress, Object msg) throws Exception {
 
-        String sentence = (String) msg;
-        
-        // Parse message
-        Matcher parser = pattern.matcher(sentence);
+        Parser parser = new Parser(PATTERN, (String) msg);
         if (!parser.matches()) {
             return null;
         }
 
-        // Create new position
         Position position = new Position();
         position.setProtocol(getProtocolName());
-        Integer index = 1;
 
-        // Detect device
-        if (!identify(parser.group(index++), channel)) {
+        if (!identify(parser.next(), channel, remoteAddress)) {
             return null;
         }
         position.setDeviceId(getDeviceId());
-        
-        // Date and time
-        Calendar time = Calendar.getInstance(TimeZone.getTimeZone("UTC"));
-        time.clear();
-        time.set(Calendar.YEAR, Integer.valueOf(parser.group(index++)));
-        time.set(Calendar.MONTH, Integer.valueOf(parser.group(index++)) - 1);
-        time.set(Calendar.DAY_OF_MONTH, Integer.valueOf(parser.group(index++)));
-        time.set(Calendar.HOUR_OF_DAY, Integer.valueOf(parser.group(index++)));
-        time.set(Calendar.MINUTE, Integer.valueOf(parser.group(index++)));
-        time.set(Calendar.SECOND, Integer.valueOf(parser.group(index++)));
-        position.setTime(time.getTime());
-        
-        // Location data
-        position.setLongitude(Double.valueOf(parser.group(index++)));
-        position.setLatitude(Double.valueOf(parser.group(index++)));
-        position.setSpeed(Double.valueOf(parser.group(index++)));
-        position.setCourse(Double.valueOf(parser.group(index++)));
-        position.setAltitude(Double.valueOf(parser.group(index++)));
-        
-        // Satellites
-        int satellites = Integer.valueOf(parser.group(index++));
+
+        DateBuilder dateBuilder = new DateBuilder()
+                .setDate(parser.nextInt(), parser.nextInt(), parser.nextInt())
+                .setTime(parser.nextInt(), parser.nextInt(), parser.nextInt());
+        position.setTime(dateBuilder.getDate());
+
+        position.setLongitude(parser.nextDouble());
+        position.setLatitude(parser.nextDouble());
+        position.setSpeed(parser.nextDouble());
+        position.setCourse(parser.nextDouble());
+        position.setAltitude(parser.nextDouble());
+
+        int satellites = parser.nextInt();
         position.setValid(satellites >= 3);
         position.set(Event.KEY_SATELLITES, satellites);
-        
-        // Report identifier
-        position.set(Event.KEY_INDEX, Long.valueOf(parser.group(index++)));
 
-        // Input
-        position.set(Event.KEY_INPUT, parser.group(index++));
+        position.set(Event.KEY_INDEX, parser.nextLong());
+        position.set(Event.KEY_INPUT, parser.next());
+        position.set(Event.KEY_OUTPUT, parser.next());
 
-        // Output
-        position.set(Event.KEY_OUTPUT, parser.group(index++));
-
-        // ADC
-        position.set(Event.PREFIX_ADC + 1, parser.group(index++));
-        position.set(Event.PREFIX_ADC + 2, parser.group(index++));
+        position.set(Event.PREFIX_ADC + 1, parser.next());
+        position.set(Event.PREFIX_ADC + 2, parser.next());
 
         // J1939 data
-        position.set("vss", parser.group(index++));
-        position.set("rpm", parser.group(index++));
-        position.set("coolant", parser.group(index++));
-        position.set(Event.KEY_FUEL, parser.group(index++));
-        position.set("consumption", parser.group(index++));
-        position.set(Event.PREFIX_TEMP + 1, parser.group(index++));
-        position.set(Event.KEY_CHARGE, parser.group(index++));
-        position.set("tpl", parser.group(index++));
-        position.set("axle", parser.group(index++));
-        position.set(Event.KEY_ODOMETER, parser.group(index++));
+        position.set(Event.KEY_OBD_SPEED, parser.next());
+        position.set(Event.KEY_RPM, parser.next());
+        position.set("coolant", parser.next());
+        position.set(Event.KEY_FUEL, parser.next());
+        position.set("consumption", parser.next());
+        position.set(Event.PREFIX_TEMP + 1, parser.next());
+        position.set(Event.KEY_CHARGE, parser.next());
+        position.set("tpl", parser.next());
+        position.set("axle", parser.next());
+        position.set(Event.KEY_ODOMETER, parser.next());
+
         return position;
     }
 

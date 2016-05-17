@@ -15,21 +15,21 @@
  */
 package org.traccar;
 
-import java.net.InetSocketAddress;
-import java.net.SocketAddress;
 import org.jboss.netty.channel.Channel;
 import org.traccar.model.Event;
 import org.traccar.model.Position;
+
+import java.net.InetSocketAddress;
+import java.net.SocketAddress;
 
 public class RemoteAddressHandler extends ExtendedObjectDecoder {
 
     @Override
     protected Object decode(
-            Channel channel, SocketAddress remoteAddress, Object msg)
-            throws Exception {
+            Channel channel, SocketAddress remoteAddress, Object msg) throws Exception {
 
         String hostAddress = ((InetSocketAddress) remoteAddress).getAddress().getHostAddress();
-        
+
         if (msg instanceof Position) {
             Position position = (Position) msg;
             position.set(Event.KEY_IP, hostAddress);

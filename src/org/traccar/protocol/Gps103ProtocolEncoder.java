@@ -16,6 +16,7 @@
 package org.traccar.protocol;
 
 import org.traccar.StringProtocolEncoder;
+import org.traccar.helper.Log;
 import org.traccar.model.Command;
 
 public class Gps103ProtocolEncoder extends StringProtocolEncoder implements StringProtocolEncoder.ValueFormatter {
@@ -39,14 +40,15 @@ public class Gps103ProtocolEncoder extends StringProtocolEncoder implements Stri
 
     @Override
     protected Object encodeCommand(Command command) {
-        
+
         switch (command.getType()) {
             case Command.TYPE_POSITION_STOP:
                 return formatCommand(command, "**,imei:{%s},A", Command.KEY_UNIQUE_ID);
             case Command.TYPE_POSITION_SINGLE:
                 return formatCommand(command, "**,imei:{%s},B", Command.KEY_UNIQUE_ID);
             case Command.TYPE_POSITION_PERIODIC:
-                return formatCommand(command, "**,imei:{%s},C,{%s}", this, Command.KEY_UNIQUE_ID, Command.KEY_FREQUENCY);
+                return formatCommand(
+                        command, "**,imei:{%s},C,{%s}", this, Command.KEY_UNIQUE_ID, Command.KEY_FREQUENCY);
             case Command.TYPE_ENGINE_STOP:
                 return formatCommand(command, "**,imei:{%s},J", Command.KEY_UNIQUE_ID);
             case Command.TYPE_ENGINE_RESUME:
@@ -55,8 +57,13 @@ public class Gps103ProtocolEncoder extends StringProtocolEncoder implements Stri
                 return formatCommand(command, "**,imei:{%s},L", Command.KEY_UNIQUE_ID);
             case Command.TYPE_ALARM_DISARM:
                 return formatCommand(command, "**,imei:{%s},M", Command.KEY_UNIQUE_ID);
+            case Command.TYPE_REQUEST_PHOTO:
+                return formatCommand(command, "**,imei:{%s},160", Command.KEY_UNIQUE_ID);
+            default:
+                Log.warning(new UnsupportedOperationException(command.getType()));
+                break;
         }
-        
+
         return null;
     }
 

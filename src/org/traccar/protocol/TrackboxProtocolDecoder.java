@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Anton Tananaev (anton.tananaev@gmail.com)
+ * Copyright 2014 - 2015 Anton Tananaev (anton.tananaev@gmail.com)
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,124 +15,90 @@
  */
 package org.traccar.protocol;
 
-import java.net.SocketAddress;
-import java.util.Calendar; 
-import java.util.TimeZone;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-
 import org.jboss.netty.channel.Channel;
-import org.jboss.netty.channel.ChannelHandlerContext;
-
 import org.traccar.BaseProtocolDecoder;
+import org.traccar.helper.DateBuilder;
+import org.traccar.helper.Parser;
+import org.traccar.helper.PatternBuilder;
 import org.traccar.model.Event;
 import org.traccar.model.Position;
 
+import java.net.SocketAddress;
+import java.util.regex.Pattern;
+
 public class TrackboxProtocolDecoder extends BaseProtocolDecoder {
-    
+
     public TrackboxProtocolDecoder(TrackboxProtocol protocol) {
         super(protocol);
     }
 
-    private static final Pattern pattern = Pattern.compile(
-            "(\\d{2})(\\d{2})(\\d{2})\\.(\\d{3})," + // Time
-            "(\\d{2})(\\d{2}\\.\\d{4})([NS])," + // Latitude (DDMM.MMMM)
-            "(\\d{3})(\\d{2}\\.\\d{4})([EW])," + // Longitude (DDDMM.MMMM)
-            "(\\d+\\.\\d)," +                    // HDOP
-            "(-?\\d+\\.?\\d*)," +                // Altitude
-            "(\\d)," +                           // Fix Type
-            "(\\d+\\.\\d+)," +                   // Course
-            "(\\d+\\.\\d+)," +                   // Speed (kph)
-            "(\\d+\\.\\d+)," +                   // Speed (knots)
-            "(\\d{2})(\\d{2})(\\d{2})," +        // Date
-            "(\\d+)");                           // Satellites
+    private static final Pattern PATTERN = new PatternBuilder()
+            .number("(dd)(dd)(dd).(ddd),")       // time
+            .number("(dd)(dd.dddd)([NS]),")      // latitude
+            .number("(ddd)(dd.dddd)([EW]),")     // longitude
+            .number("(d+.d),")                   // hdop
+            .number("(-?d+.?d*),")               // altitude
+            .number("(d),")                      // fix type
+            .number("(d+.d+),")                  // course
+            .number("d+.d+,")                    // speed (kph)
+            .number("(d+.d+),")                  // speed (knots)
+            .number("(dd)(dd)(dd),")             // date
+            .number("(d+)")                      // satellites
+            .compile();
 
     private void sendResponse(Channel channel) {
         if (channel != null) {
             channel.write("=OK=\r\n");
         }
     }
-    
+
     @Override
     protected Object decode(
-            Channel channel, SocketAddress remoteAddress, Object msg)
-            throws Exception {
+            Channel channel, SocketAddress remoteAddress, Object msg) throws Exception {
 
         String sentence = (String) msg;
 
         if (sentence.startsWith("a=connect")) {
             String id = sentence.substring(sentence.indexOf("i=") + 2);
-            if (identify(id, channel)) {
+            if (identify(id, channel, remoteAddress)) {
                 sendResponse(channel);
             }
+            return null;
         }
-        
-        else {
-            // Parse message
-            Matcher parser = pattern.matcher(sentence);
-            if (!parser.matches()) {
-                return null;
-            }
-            sendResponse(channel);
 
-            // Create new position
-            Position position = new Position();
-            position.setDeviceId(getDeviceId());
-            position.setProtocol(getProtocolName());
-
-            Integer index = 1;
-
-            // Time
-            Calendar time = Calendar.getInstance(TimeZone.getTimeZone("UTC"));
-            time.clear();
-            time.set(Calendar.HOUR_OF_DAY, Integer.valueOf(parser.group(index++)));
-            time.set(Calendar.MINUTE, Integer.valueOf(parser.group(index++)));
-            time.set(Calendar.SECOND, Integer.valueOf(parser.group(index++)));
-            time.set(Calendar.MILLISECOND, Integer.valueOf(parser.group(index++)));
-
-            // Latitude
-            Double latitude = Double.valueOf(parser.group(index++));
-            latitude += Double.valueOf(parser.group(index++)) / 60;
-            if (parser.group(index++).compareTo("S") == 0) latitude = -latitude;
-            position.setLatitude(latitude);
-
-            // Longitude
-            Double longitude = Double.valueOf(parser.group(index++));
-            longitude += Double.valueOf(parser.group(index++)) / 60;
-            if (parser.group(index++).compareTo("W") == 0) longitude = -longitude;
-            position.setLongitude(longitude);
-            
-            // HDOP
-            position.set(Event.KEY_HDOP, parser.group(index++));
-
-            // Altitude
-            position.setAltitude(Double.valueOf(parser.group(index++)));
-            
-            // Validity
-            int fix = Integer.valueOf(parser.group(index++));
-            position.set(Event.KEY_GPS, fix);
-            position.setValid(fix > 0);
-
-            // Course
-            position.setCourse(Double.valueOf(parser.group(index++)));
-
-            // Speed
-            index += 1; // speed in kph
-            position.setSpeed(Double.valueOf(parser.group(index++)));
-
-            // Date
-            time.set(Calendar.DAY_OF_MONTH, Integer.valueOf(parser.group(index++)));
-            time.set(Calendar.MONTH, Integer.valueOf(parser.group(index++)) - 1);
-            time.set(Calendar.YEAR, 2000 + Integer.valueOf(parser.group(index++)));
-            position.setTime(time.getTime());
-
-            // Satellites
-            position.set(Event.KEY_SATELLITES, parser.group(index++));
-
-            return position;
+        Parser parser = new Parser(PATTERN, sentence);
+        if (!parser.matches()) {
+            return null;
         }
-        
-        return null;
+        sendResponse(channel);
+
+        Position position = new Position();
+        position.setDeviceId(getDeviceId());
+        position.setProtocol(getProtocolName());
+
+        DateBuilder dateBuilder = new DateBuilder()
+                .setTime(parser.nextInt(), parser.nextInt(), parser.nextInt(), parser.nextInt());
+
+        position.setLatitude(parser.nextCoordinate());
+        position.setLongitude(parser.nextCoordinate());
+
+        position.set(Event.KEY_HDOP, parser.next());
+
+        position.setAltitude(parser.nextDouble());
+
+        int fix = parser.nextInt();
+        position.set(Event.KEY_GPS, fix);
+        position.setValid(fix > 0);
+
+        position.setCourse(parser.nextDouble());
+        position.setSpeed(parser.nextDouble());
+
+        dateBuilder.setDateReverse(parser.nextInt(), parser.nextInt(), parser.nextInt());
+        position.setTime(dateBuilder.getDate());
+
+        position.set(Event.KEY_SATELLITES, parser.next());
+
+        return position;
     }
 
 }

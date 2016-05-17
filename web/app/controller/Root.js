@@ -16,62 +16,116 @@
 
 Ext.define('Traccar.controller.Root', {
     extend: 'Ext.app.Controller',
-    
+
     requires: [
-        'Traccar.LoginManager',
-        'Traccar.view.login.Login',
-        'Traccar.view.main.Main',
-        'Traccar.view.main.MainMobile'
+        'Traccar.view.Login',
+        'Traccar.view.Main',
+        'Traccar.view.MainMobile'
     ],
 
-    init: function() {
+    init: function () {
         var indicator = document.createElement('div');
         indicator.className = 'state-indicator';
         document.body.appendChild(indicator);
         this.isPhone = parseInt(window.getComputedStyle(indicator).getPropertyValue('z-index'), 10) !== 0;
     },
-    
+
     onLaunch: function () {
-        Traccar.LoginManager.server({
+        Ext.Ajax.request({
             scope: this,
-            callback: 'onServer'
+            url: '/api/server',
+            callback: this.onServerReturn
         });
     },
 
-    onServer: function() {
-        Traccar.LoginManager.session({
-            scope: this,
-            callback: 'onSession'
-        });
-    },
-    
-    onSession: function(success) {
+    onServerReturn: function (options, success, response) {
+        Ext.get('spinner').remove();
         if (success) {
+            Traccar.app.setServer(Ext.decode(response.responseText));
+            Ext.Ajax.request({
+                scope: this,
+                url: '/api/session',
+                callback: this.onSessionReturn
+            });
+        } else {
+            Traccar.app.showError(response);
+        }
+    },
+
+    onSessionReturn: function (options, success, response) {
+        if (success) {
+            Traccar.app.setUser(Ext.decode(response.responseText));
             this.loadApp();
         } else {
-            this.login = Ext.create('Traccar.view.login.Login', {
+            this.login = Ext.create('widget.login', {
                 listeners: {
                     scope: this,
-                    login: 'onLogin'
+                    login: this.onLogin
                 }
             });
             this.login.show();
         }
     },
 
-    onLogin: function() {
+    onLogin: function () {
         this.login.close();
         this.loadApp();
     },
-    
-    loadApp: function() {
-        Ext.getStore('Devices').load();
-        Ext.getBody().empty();
-        if (this.isPhone) {
-            Ext.create('Traccar.view.main.MainMobile');
-        } else {
-            Ext.create('Traccar.view.main.Main');
-        }
-    }
 
+    loadApp: function () {
+        Ext.getStore('Groups').load();
+        Ext.getStore('Devices').load();
+        Ext.get('attribution').remove();
+        if (this.isPhone) {
+            Ext.create('widget.mainMobile');
+        } else {
+            Ext.create('widget.main');
+        }
+        this.asyncUpdate(true);
+    },
+
+    asyncUpdate: function (first) {
+        var protocol, socket, self = this;
+        protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+        socket = new WebSocket(protocol + '//' + window.location.host + '/api/socket');
+
+        socket.onclose = function (event) {
+            self.asyncUpdate(false);
+        };
+
+        socket.onmessage = function (event) {
+            var i, store, data, array, entity;
+
+            data = Ext.decode(event.data);
+
+            if (data.devices) {
+                array = data.devices;
+                store = Ext.getStore('Devices');
+                for (i = 0; i < array.length; i++) {
+                    entity = store.getById(array[i].id);
+                    if (entity) {
+                        entity.set({
+                            status: array[i].status,
+                            lastUpdate: array[i].lastUpdate
+                        }, {
+                            dirty: false
+                        });
+                    }
+                }
+            }
+
+            if (data.positions) {
+                array = data.positions;
+                store = Ext.getStore('LatestPositions');
+                for (i = 0; i < array.length; i++) {
+                    entity = store.findRecord('deviceId', array[i].deviceId, 0, false, false, true);
+                    if (entity) {
+                        entity.set(array[i]);
+                    } else {
+                        store.add(Ext.create('Traccar.model.Position', array[i]));
+                    }
+                }
+            }
+        };
+    }
 });

@@ -17,57 +17,61 @@ package org.traccar;
 
 import org.traccar.helper.DistanceCalculator;
 import org.traccar.helper.Log;
+import org.traccar.model.Event;
 import org.traccar.model.Position;
 
 public class FilterHandler extends BaseDataHandler {
 
-    private boolean filterInvalid;
-    private boolean filterZero;
-    private boolean filterDuplicate;
-    private int filterDistance;
-    private long filterLimit;
-    
+    private static final long FILTER_FUTURE_LIMIT = 5 * 60 * 1000;
+
+    private final boolean filterInvalid;
+    private final boolean filterZero;
+    private final boolean filterDuplicate;
+    private final boolean filterFuture;
+    private final boolean filterApproximate;
+    private final int filterDistance;
+    private final long filterLimit;
+
     public FilterHandler(
-            boolean filterInvalid,
-            boolean filterZero,
-            boolean filterDuplicate,
-            int filterDistance,
-            long filterLimit) {
+            boolean filterInvalid, boolean filterZero, boolean filterDuplicate, boolean filterFuture,
+            boolean filterApproximate, int filterDistance, long filterLimit) {
 
         this.filterInvalid = filterInvalid;
         this.filterZero = filterZero;
         this.filterDuplicate = filterDuplicate;
         this.filterDistance = filterDistance;
+        this.filterFuture = filterFuture;
+        this.filterApproximate = filterApproximate;
         this.filterLimit = filterLimit;
     }
-    
+
     public FilterHandler() {
         Config config = Context.getConfig();
 
         filterInvalid = config.getBoolean("filter.invalid");
         filterZero = config.getBoolean("filter.zero");
         filterDuplicate = config.getBoolean("filter.duplicate");
+        filterFuture = config.getBoolean("filter.future");
+        filterApproximate = config.getBoolean("filter.approximate");
         filterDistance = config.getInteger("filter.distance");
         filterLimit = config.getLong("filter.limit") * 1000;
     }
-    
+
     private Position getLastPosition(long deviceId) {
         if (Context.getConnectionManager() != null) {
             return Context.getConnectionManager().getLastPosition(deviceId);
         }
         return null;
     }
-    
+
     private boolean filterInvalid(Position position) {
         return filterInvalid && !position.getValid();
     }
-    
+
     private boolean filterZero(Position position) {
-        return filterZero &&
-                (position.getLatitude() == 0.0) &&
-                (position.getLongitude() == 0.0);
+        return filterZero && position.getLatitude() == 0.0 && position.getLongitude() == 0.0;
     }
-    
+
     private boolean filterDuplicate(Position position) {
         if (filterDuplicate) {
             Position last = getLastPosition(position.getDeviceId());
@@ -80,7 +84,16 @@ public class FilterHandler extends BaseDataHandler {
             return false;
         }
     }
-    
+
+    private boolean filterFuture(Position position) {
+        return filterFuture && position.getFixTime().getTime() > System.currentTimeMillis() + FILTER_FUTURE_LIMIT;
+    }
+
+    private boolean filterApproximate(Position position) {
+        Boolean approximate = (Boolean) position.getAttributes().get(Event.KEY_APPROXIMATE);
+        return filterApproximate && approximate != null && approximate;
+    }
+
     private boolean filterDistance(Position position) {
         if (filterDistance != 0) {
             Position last = getLastPosition(position.getDeviceId());
@@ -96,7 +109,7 @@ public class FilterHandler extends BaseDataHandler {
             return false;
         }
     }
-    
+
     private boolean filterLimit(Position position) {
         if (filterLimit != 0) {
             Position last = getLastPosition(position.getDeviceId());
@@ -109,19 +122,16 @@ public class FilterHandler extends BaseDataHandler {
             return false;
         }
     }
-    
+
     private boolean filter(Position p) {
-        
-        boolean result =
-                filterInvalid(p) ||
-                filterZero(p) ||
-                filterDuplicate(p) ||
-                filterDistance(p);
-        
+
+        boolean result = filterInvalid(p) || filterZero(p) || filterDuplicate(p)
+                || filterFuture(p) || filterApproximate(p) || filterDistance(p);
+
         if (filterLimit(p)) {
             result = false;
         }
-        
+
         if (result) {
             Log.info("Position filtered from " + p.getDeviceId());
         }
@@ -131,7 +141,10 @@ public class FilterHandler extends BaseDataHandler {
 
     @Override
     protected Position handlePosition(Position position) {
-        return filter(position) ? null : position;
+        if (filter(position)) {
+            return null;
+        }
+        return position;
     }
 
 }

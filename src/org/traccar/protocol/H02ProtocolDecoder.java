@@ -15,185 +15,193 @@
  */
 package org.traccar.protocol;
 
-import java.nio.charset.Charset;
-import java.net.SocketAddress;
-import java.util.Calendar; 
-import java.util.TimeZone;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-
 import org.jboss.netty.buffer.ChannelBuffer;
+import org.jboss.netty.buffer.ChannelBuffers;
 import org.jboss.netty.channel.Channel;
-import org.jboss.netty.channel.ChannelHandlerContext;
-
 import org.traccar.BaseProtocolDecoder;
-import org.traccar.helper.ChannelBufferTools;
+import org.traccar.helper.BcdUtil;
+import org.traccar.helper.BitUtil;
+import org.traccar.helper.DateBuilder;
+import org.traccar.helper.Parser;
+import org.traccar.helper.PatternBuilder;
 import org.traccar.model.Event;
 import org.traccar.model.Position;
+
+import java.net.SocketAddress;
+import java.nio.charset.StandardCharsets;
+import java.util.regex.Pattern;
 
 public class H02ProtocolDecoder extends BaseProtocolDecoder {
 
     public H02ProtocolDecoder(H02Protocol protocol) {
         super(protocol);
     }
-    
+
     private static double readCoordinate(ChannelBuffer buf, boolean lon) {
-        
-        int degrees = ChannelBufferTools.readHexInteger(buf, 2);
+
+        int degrees = BcdUtil.readInteger(buf, 2);
         if (lon) {
             degrees = degrees * 10 + (buf.getUnsignedByte(buf.readerIndex()) >> 4);
         }
-        
+
         double result = 0;
         if (lon) {
             result = buf.readUnsignedByte() & 0x0f;
         }
-        result = result * 10 + ChannelBufferTools.readHexInteger(buf, lon ? 5 : 6) * 0.0001;
-        
+
+        int length = 6;
+        if (lon) {
+            length = 5;
+        }
+
+        result = result * 10 + BcdUtil.readInteger(buf, length) * 0.0001;
+
         result /= 60;
         result += degrees;
 
         return result;
     }
-    
-    private Position decodeBinary(ChannelBuffer buf, Channel channel) {
-        
-        // Create new position
+
+    private void processStatus(Position position, long status) {
+        if (!BitUtil.check(status, 0) || !BitUtil.check(status, 1)
+                || !BitUtil.check(status, 3) || !BitUtil.check(status, 4)) {
+            position.set(Event.KEY_ALARM, true);
+        }
+        position.set(Event.KEY_IGNITION, !BitUtil.check(status, 10));
+        position.set(Event.KEY_STATUS, status);
+    }
+
+    private Position decodeBinary(ChannelBuffer buf, Channel channel, SocketAddress remoteAddress) {
+
         Position position = new Position();
         position.setProtocol(getProtocolName());
-        
+
         buf.readByte(); // marker
 
-        // Identification
-        if (!identify(ChannelBufferTools.readHexString(buf, 10), channel)) {
+        if (!identify(ChannelBuffers.hexDump(buf.readBytes(5)), channel, remoteAddress)) {
             return null;
         }
         position.setDeviceId(getDeviceId());
 
-        // Time
-        Calendar time = Calendar.getInstance(TimeZone.getTimeZone("UTC"));
-        time.clear();
-        time.set(Calendar.HOUR_OF_DAY, ChannelBufferTools.readHexInteger(buf, 2));
-        time.set(Calendar.MINUTE, ChannelBufferTools.readHexInteger(buf, 2));
-        time.set(Calendar.SECOND, ChannelBufferTools.readHexInteger(buf, 2));
-        time.set(Calendar.DAY_OF_MONTH, ChannelBufferTools.readHexInteger(buf, 2));
-        time.set(Calendar.MONTH, ChannelBufferTools.readHexInteger(buf, 2) - 1);
-        time.set(Calendar.YEAR, 2000 + ChannelBufferTools.readHexInteger(buf, 2));
-        position.setTime(time.getTime());
-        
-        // Location
+        DateBuilder dateBuilder = new DateBuilder()
+                .setHour(BcdUtil.readInteger(buf, 2))
+                .setMinute(BcdUtil.readInteger(buf, 2))
+                .setSecond(BcdUtil.readInteger(buf, 2))
+                .setDay(BcdUtil.readInteger(buf, 2))
+                .setMonth(BcdUtil.readInteger(buf, 2))
+                .setYear(BcdUtil.readInteger(buf, 2));
+        position.setTime(dateBuilder.getDate());
+
         double latitude = readCoordinate(buf, false);
         position.set(Event.KEY_POWER, buf.readByte());
         double longitude = readCoordinate(buf, true);
+
         int flags = buf.readUnsignedByte() & 0x0f;
         position.setValid((flags & 0x02) != 0);
-        if ((flags & 0x04) == 0) latitude = -latitude;
-        if ((flags & 0x08) == 0) longitude = -longitude;
+        if ((flags & 0x04) == 0) {
+            latitude = -latitude;
+        }
+        if ((flags & 0x08) == 0) {
+            longitude = -longitude;
+        }
+
         position.setLatitude(latitude);
         position.setLongitude(longitude);
 
-        // Speed and course
-        position.setSpeed(ChannelBufferTools.readHexInteger(buf, 3));
-        position.setCourse((buf.readUnsignedByte() & 0x0f) * 100.0 + ChannelBufferTools.readHexInteger(buf, 2));
-        
-        // Status
-        position.set(Event.KEY_STATUS, ChannelBufferTools.readHexString(buf, 8));
+        position.setSpeed(BcdUtil.readInteger(buf, 3));
+        position.setCourse((buf.readUnsignedByte() & 0x0f) * 100.0 + BcdUtil.readInteger(buf, 2));
+
+        processStatus(position, buf.readUnsignedInt());
         return position;
     }
 
-    private static final Pattern pattern = Pattern.compile(
-    	    "\\*..," +                          // Manufacturer
-            "(\\d+)," +                         // IMEI
-            "V\\d," +                           // Version?
-            ".*" +
-            "(\\d{2})(\\d{2})(\\d{2})," +       // Time (HHMMSS)
-            "([AV])," +                         // Validity
-            "-?(\\d+)-?(\\d{2}.\\d+)," +        // Latitude (DDMM.MMMM)
-            "([NS])," +
-            "-?(\\d+)-?(\\d{2}.\\d+)," +        // Longitude (DDMM.MMMM)
-            "([EW])," +
-            "(\\d+.?\\d*)," +                   // Speed
-            "(\\d+.?\\d*)?," +                  // Course
-            "(\\d{2})(\\d{2})(\\d{2})," +       // Date (DDMMYY)
-            "(\\p{XDigit}{8})" +                // Status
-            ".*");
-    
-    private Position decodeText(String sentence, Channel channel) {
+    private static final Pattern PATTERN = new PatternBuilder()
+            .text("*")
+            .expression("..,")                   // manufacturer
+            .number("(d+),")                     // imei
+            .number("Vd,")                       // version?
+            .any()
+            .number("(dd)(dd)(dd),")             // time
+            .expression("([AV])?,")              // validity
+            .groupBegin()
+            .number("-(d+)-(d+.d+),")            // latitude
+            .or()
+            .number("(d+)(dd.d+),")              // latitude
+            .groupEnd()
+            .expression("([NS]),")
+            .groupBegin()
+            .number("-(d+)-(d+.d+),")            // longitude
+            .or()
+            .number("(d+)(dd.d+),")              // longitude
+            .groupEnd()
+            .expression("([EW]),")
+            .number("(d+.?d*),")                 // speed
+            .number("(d+.?d*)?,")                // course
+            .number("(dd)(dd)(dd),")             // date (ddmmyy)
+            .number("(x{8})")                    // status
+            .any()
+            .compile();
 
-        // Parse message
-        Matcher parser = pattern.matcher(sentence);
+    private Position decodeText(String sentence, Channel channel, SocketAddress remoteAddress) {
+
+        Parser parser = new Parser(PATTERN, sentence);
         if (!parser.matches()) {
             return null;
         }
 
-        // Create new position
         Position position = new Position();
         position.setProtocol(getProtocolName());
 
-        Integer index = 1;
-
-        // Get device by IMEI
-        if (!identify(parser.group(index++), channel)) {
+        if (!identify(parser.next(), channel, remoteAddress)) {
             return null;
         }
         position.setDeviceId(getDeviceId());
 
-        // Time
-        Calendar time = Calendar.getInstance(TimeZone.getTimeZone("UTC"));
-        time.clear();
-        time.set(Calendar.HOUR_OF_DAY, Integer.valueOf(parser.group(index++)));
-        time.set(Calendar.MINUTE, Integer.valueOf(parser.group(index++)));
-        time.set(Calendar.SECOND, Integer.valueOf(parser.group(index++)));
+        DateBuilder dateBuilder = new DateBuilder()
+                .setTime(parser.nextInt(), parser.nextInt(), parser.nextInt());
 
-        // Validity
-        position.setValid(parser.group(index++).compareTo("A") == 0);
-
-        // Latitude
-        Double latitude = Double.valueOf(parser.group(index++));
-        latitude += Double.valueOf(parser.group(index++)) / 60;
-        if (parser.group(index++).compareTo("S") == 0) latitude = -latitude;
-        position.setLatitude(latitude);
-
-        // Longitude
-        Double longitude = Double.valueOf(parser.group(index++));
-        longitude += Double.valueOf(parser.group(index++)) / 60;
-        if (parser.group(index++).compareTo("W") == 0) longitude = -longitude;
-        position.setLongitude(longitude);
-
-        // Speed
-        position.setSpeed(Double.valueOf(parser.group(index++)));
-
-        // Course
-        String course = parser.group(index++);
-        if (course != null) {
-            position.setCourse(Double.valueOf(course));
+        if (parser.hasNext()) {
+            position.setValid(parser.next().equals("A"));
         }
 
-        // Date
-        time.set(Calendar.DAY_OF_MONTH, Integer.valueOf(parser.group(index++)));
-        time.set(Calendar.MONTH, Integer.valueOf(parser.group(index++)) - 1);
-        time.set(Calendar.YEAR, 2000 + Integer.valueOf(parser.group(index++)));
-        position.setTime(time.getTime());
-        
-        // Status
-        position.set(Event.KEY_STATUS, parser.group(index++));
+        if (parser.hasNext(2)) {
+            position.setLatitude(-parser.nextCoordinate());
+        }
+        if (parser.hasNext(2)) {
+            position.setLatitude(parser.nextCoordinate());
+        }
+
+        if (parser.hasNext(2)) {
+            position.setLongitude(-parser.nextCoordinate());
+        }
+        if (parser.hasNext(2)) {
+            position.setLongitude(parser.nextCoordinate());
+        }
+
+        position.setSpeed(parser.nextDouble());
+        position.setCourse(parser.nextDouble());
+
+        dateBuilder.setDateReverse(parser.nextInt(), parser.nextInt(), parser.nextInt());
+        position.setTime(dateBuilder.getDate());
+
+        processStatus(position, parser.nextLong(16));
+
         return position;
     }
 
     @Override
     protected Object decode(
-            Channel channel, SocketAddress remoteAddress, Object msg)
-            throws Exception {
-        
+            Channel channel, SocketAddress remoteAddress, Object msg) throws Exception {
+
         ChannelBuffer buf = (ChannelBuffer) msg;
-        String marker = buf.toString(0, 1, Charset.defaultCharset());
-        
-        // TODO X mode?
+        String marker = buf.toString(0, 1, StandardCharsets.US_ASCII);
+
+        // handle X mode?
 
         if (marker.equals("*")) {
-            return decodeText(buf.toString(Charset.defaultCharset()), channel);
+            return decodeText(buf.toString(StandardCharsets.US_ASCII), channel, remoteAddress);
         } else if (marker.equals("$")) {
-            return decodeBinary(buf, channel);
+            return decodeBinary(buf, channel, remoteAddress);
         }
 
         return null;

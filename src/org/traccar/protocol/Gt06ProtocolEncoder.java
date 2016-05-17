@@ -18,9 +18,11 @@ package org.traccar.protocol;
 import org.jboss.netty.buffer.ChannelBuffer;
 import org.jboss.netty.buffer.ChannelBuffers;
 import org.traccar.BaseProtocolEncoder;
-import org.traccar.helper.ChannelBufferTools;
-import org.traccar.helper.Crc;
+import org.traccar.helper.Checksum;
+import org.traccar.helper.Log;
 import org.traccar.model.Command;
+
+import java.nio.charset.StandardCharsets;
 
 public class Gt06ProtocolEncoder extends BaseProtocolEncoder {
 
@@ -35,31 +37,34 @@ public class Gt06ProtocolEncoder extends BaseProtocolEncoder {
 
         buf.writeByte(0x80); // message type
 
-        buf.writeByte(content.length()); // command length
+        buf.writeByte(4 + content.length()); // command length
         buf.writeInt(0);
-        buf.writeBytes(content.getBytes()); // command
+        buf.writeBytes(content.getBytes(StandardCharsets.US_ASCII)); // command
 
         buf.writeShort(0); // message index
 
-        buf.writeShort(Crc.crc16Ccitt(buf.toByteBuffer(2, buf.writerIndex() - 2)));
+        buf.writeShort(Checksum.crc16(Checksum.CRC16_X25, buf.toByteBuffer(2, buf.writerIndex() - 2)));
 
         buf.writeByte('\r');
         buf.writeByte('\n');
 
         return buf;
     }
-    
+
     @Override
     protected Object encodeCommand(Command command) {
-        
+
         switch (command.getType()) {
             case Command.TYPE_ENGINE_STOP:
-                return encodeContent("DYD,000000#");
+                return encodeContent("Relay,1#");
             case Command.TYPE_ENGINE_RESUME:
-                return encodeContent("HFYD,000000#");
+                return encodeContent("Relay,0#");
+            default:
+                Log.warning(new UnsupportedOperationException(command.getType()));
+                break;
         }
 
         return null;
     }
-    
+
 }

@@ -15,14 +15,20 @@
  */
 package org.traccar;
 
-import com.ning.http.client.AsyncHttpClient;
+import org.traccar.helper.Checksum;
+import org.traccar.helper.Log;
+import org.traccar.model.Device;
+import org.traccar.model.Event;
+import org.traccar.model.MiscFormatter;
+import org.traccar.model.Position;
+
+import java.io.UnsupportedEncodingException;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.Calendar;
 import java.util.Formatter;
 import java.util.Locale;
 import java.util.TimeZone;
-import org.traccar.helper.Crc;
-import org.traccar.model.Device;
-import org.traccar.model.Position;
 
 public class WebDataHandler extends BaseDataHandler {
 
@@ -31,7 +37,7 @@ public class WebDataHandler extends BaseDataHandler {
     public WebDataHandler(String url) {
         this.url = url;
     }
-    
+
     private static String formatSentence(Position position) {
 
         StringBuilder s = new StringBuilder("$GPRMC,");
@@ -40,38 +46,99 @@ public class WebDataHandler extends BaseDataHandler {
 
             Calendar calendar = Calendar.getInstance(TimeZone.getTimeZone("UTC"), Locale.ENGLISH);
             calendar.setTimeInMillis(position.getFixTime().getTime());
-            
+
             f.format("%1$tH%1$tM%1$tS.%1$tL,A,", calendar);
-            
+
             double lat = position.getLatitude();
             double lon = position.getLongitude();
-            f.format("%02d%07.4f,%c,", (int) Math.abs(lat), Math.abs(lat) % 1 * 60, lat < 0 ? 'S' : 'N');
-            f.format("%03d%07.4f,%c,", (int) Math.abs(lon), Math.abs(lon) % 1 * 60, lon < 0 ? 'W' : 'E');
-            
+
+            char hemisphere;
+
+            if (lat < 0) {
+                hemisphere = 'S';
+            } else {
+                hemisphere = 'N';
+            }
+
+            f.format("%02d%07.4f,%c,", (int) Math.abs(lat), Math.abs(lat) % 1 * 60, hemisphere);
+
+            if (lon < 0) {
+                hemisphere = 'W';
+            } else {
+                hemisphere = 'E';
+            }
+
+            f.format("%03d%07.4f,%c,", (int) Math.abs(lon), Math.abs(lon) % 1 * 60, hemisphere);
+
             f.format("%.2f,%.2f,", position.getSpeed(), position.getCourse());
             f.format("%1$td%1$tm%1$ty,,", calendar);
         }
 
-        s.append(Crc.nmeaChecksum(s.toString()));
+        s.append(Checksum.nmea(s.toString()));
 
         return s.toString();
     }
 
+    private String calculateStatus(Position position) {
+        if (position.getAttributes().containsKey(Event.KEY_ALARM)) {
+            return "0xF841"; // STATUS_PANIC_ON
+        } else if (position.getSpeed() < 1.0) {
+            return "0xF020"; // STATUS_LOCATION
+        } else {
+            return "0xF11C"; // STATUS_MOTION_MOVING
+        }
+    }
+
+    public String formatRequest(Position position) {
+
+        Device device = Context.getIdentityManager().getDeviceById(position.getDeviceId());
+
+        String attributes = MiscFormatter.toJsonString(position.getAttributes());
+
+        String request = url
+                .replace("{name}", device.getName())
+                .replace("{uniqueId}", device.getUniqueId())
+                .replace("{deviceId}", String.valueOf(position.getDeviceId()))
+                .replace("{protocol}", String.valueOf(position.getProtocol()))
+                .replace("{deviceTime}", String.valueOf(position.getDeviceTime().getTime()))
+                .replace("{fixTime}", String.valueOf(position.getFixTime().getTime()))
+                .replace("{valid}", String.valueOf(position.getValid()))
+                .replace("{latitude}", String.valueOf(position.getLatitude()))
+                .replace("{longitude}", String.valueOf(position.getLongitude()))
+                .replace("{altitude}", String.valueOf(position.getAltitude()))
+                .replace("{speed}", String.valueOf(position.getSpeed()))
+                .replace("{course}", String.valueOf(position.getCourse()))
+                .replace("{statusCode}", calculateStatus(position));
+
+        if (position.getAddress() != null) {
+            try {
+                request = request.replace(
+                        "{address}", URLEncoder.encode(position.getAddress(), StandardCharsets.UTF_8.name()));
+            } catch (UnsupportedEncodingException error) {
+                Log.warning(error);
+            }
+        }
+
+        if (request.contains("{attributes}")) {
+            try {
+                request = request.replace(
+                        "{attributes}", URLEncoder.encode(attributes, StandardCharsets.UTF_8.name()));
+            } catch (UnsupportedEncodingException error) {
+                Log.warning(error);
+            }
+        }
+
+        if (request.contains("{gprmc}")) {
+            request = request.replace("{gprmc}", formatSentence(position));
+        }
+
+        return request;
+    }
+
     @Override
     protected Position handlePosition(Position position) {
-        
-        Device device = Context.getIdentityManager().getDeviceById(position.getDeviceId());
-        
-        String request = url.
-                replace("{uniqueId}", device.getUniqueId()).
-                replace("{deviceId}", String.valueOf(device.getId())).
-                replace("{fixTime}", String.valueOf(position.getFixTime().getTime())).
-                replace("{latitude}", String.valueOf(position.getLatitude())).
-                replace("{longitude}", String.valueOf(position.getLongitude())).
-                replace("{gprmc}", formatSentence(position));
-        
-        AsyncHttpClient asyncHttpClient = new AsyncHttpClient();
-        asyncHttpClient.prepareGet(request).execute();
+
+        Context.getAsyncHttpClient().prepareGet(formatRequest(position)).execute();
 
         return position;
     }

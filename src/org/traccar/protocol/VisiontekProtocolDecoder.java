@@ -15,17 +15,17 @@
  */
 package org.traccar.protocol;
 
-import java.net.SocketAddress;
-import java.util.Calendar; 
-import java.util.TimeZone;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import org.jboss.netty.channel.Channel;
-import org.jboss.netty.channel.ChannelHandlerContext;
 import org.traccar.BaseProtocolDecoder;
+import org.traccar.helper.DateBuilder;
+import org.traccar.helper.Parser;
+import org.traccar.helper.PatternBuilder;
 import org.traccar.helper.UnitsConverter;
 import org.traccar.model.Event;
 import org.traccar.model.Position;
+
+import java.net.SocketAddress;
+import java.util.regex.Pattern;
 
 public class VisiontekProtocolDecoder extends BaseProtocolDecoder {
 
@@ -33,107 +33,93 @@ public class VisiontekProtocolDecoder extends BaseProtocolDecoder {
         super(protocol);
     }
 
-    private static final Pattern pattern = Pattern.compile(
-            "\\$1," +
-            "([^,]+)," +                        // Identifier
-            "(?:(\\d+),)?" +                    // IMEI
-            "(\\d{2}),(\\d{2}),(\\d{2})," +     // Date
-            "(\\d{2}),(\\d{2}),(\\d{2})," +     // Time
-            "(\\d{2})(\\d{2}\\.?\\d{4})([NS])," + // Latitude
-            "(\\d{3})(\\d{2}\\.?\\d{4})([EW])," + // Longitude
-            "(\\d+\\.?\\d+)," +                 // Speed
-            "(\\d+)," +                         // Course
-            "(?:(\\d+)," +                      // Altitude
-            "(\\d+),)?" +                       // Satellites
-            "(\\d+)," +                         // Odometer
-            "(?:(\\d)," +                       // Ignition
-            "(\\d)," +                          // Input 1
-            "(\\d)," +                          // Input 2
-            "(\\d)," +                          // Immobilizer
-            "(\\d)," +                          // External Battery Status
-            "(\\d+),)?" +                       // GSM
-            "([AV]),?" +                        // Validity
-            "(\\d+)?" +                         // RFID
-            ".*");
+    private static final Pattern PATTERN = new PatternBuilder()
+            .text("$1,")
+            .expression("([^,]+),")              // identifier
+            .number("(d+),").optional()          // imei
+            .number("(dd),(dd),(dd),")           // date
+            .number("(dd),(dd),(dd),")           // time
+            .groupBegin()
+            .number("(dd)(dd).?(d+)([NS]),")     // latitude
+            .number("(ddd)(dd).?(d+)([EW]),")    // longitude
+            .or()
+            .number("(dd.d+)([NS]),")            // latitude
+            .number("(ddd.d+)([EW]),")           // longitude
+            .groupEnd()
+            .number("(d+.?d+),")                 // speed
+            .number("(d+),")                     // course
+            .groupBegin()
+            .groupBegin()
+            .number("(d+),")                     // altitude
+            .number("(d+),")                     // satellites
+            .groupEnd("?")
+            .number("(d+),")                     // odometer
+            .groupBegin()
+            .number("(d),")                      // ignition
+            .number("(d),")                      // input 1
+            .number("(d),")                      // input 2
+            .number("(d),")                      // immobilizer
+            .number("(d),")                      // external battery status
+            .number("(d+),")                     // gsm
+            .groupEnd("?")
+            .groupEnd("?")
+            .any()
+            .expression("([AV])")                // validity
+            .number(",(d{10})").optional()       // rfid
+            .any()
+            .compile();
 
     @Override
     protected Object decode(
-            Channel channel, SocketAddress remoteAddress, Object msg)
-            throws Exception {
+            Channel channel, SocketAddress remoteAddress, Object msg) throws Exception {
 
-        String sentence = (String) msg;
-
-        // Parse message
-        Matcher parser = pattern.matcher(sentence);
+        Parser parser = new Parser(PATTERN, (String) msg);
         if (!parser.matches()) {
             return null;
         }
 
-        // Create new position
         Position position = new Position();
         position.setProtocol(getProtocolName());
 
-        Integer index = 1;
-
-        // Device identification
-        String id = parser.group(index++);
-        String imei = parser.group(index++);
-        if (!identify(id, channel, null, false) && !identify(imei, channel)) {
+        String id = parser.next();
+        String imei = parser.next();
+        if (!identify(id, channel, remoteAddress, false) && (imei == null || !identify(imei, channel, remoteAddress))) {
             return null;
         }
         position.setDeviceId(getDeviceId());
 
-        // Date
-        Calendar time = Calendar.getInstance(TimeZone.getTimeZone("UTC"));
-        time.clear();
-        time.set(Calendar.DAY_OF_MONTH, Integer.valueOf(parser.group(index++)));
-        time.set(Calendar.MONTH, Integer.valueOf(parser.group(index++)) - 1);
-        time.set(Calendar.YEAR, 2000 + Integer.valueOf(parser.group(index++)));
-        time.set(Calendar.HOUR_OF_DAY, Integer.valueOf(parser.group(index++)));
-        time.set(Calendar.MINUTE, Integer.valueOf(parser.group(index++)));
-        time.set(Calendar.SECOND, Integer.valueOf(parser.group(index++)));
-        position.setTime(time.getTime());
+        DateBuilder dateBuilder = new DateBuilder()
+                .setDateReverse(parser.nextInt(), parser.nextInt(), parser.nextInt())
+                .setTime(parser.nextInt(), parser.nextInt(), parser.nextInt());
+        position.setTime(dateBuilder.getDate());
 
-        // Latitude
-        Double latitude = Double.valueOf(parser.group(index++));
-        latitude += Double.valueOf(parser.group(index++).replace(".", "")) / 600000;
-        if (parser.group(index++).compareTo("S") == 0) latitude = -latitude;
-        position.setLatitude(latitude);
-
-        // Longitude
-        Double longitude = Double.valueOf(parser.group(index++));
-        longitude += Double.valueOf(parser.group(index++).replace(".", "")) / 600000;
-        if (parser.group(index++).compareTo("W") == 0) longitude = -longitude;
-        position.setLongitude(longitude);
-
-        // Speed
-        position.setSpeed(UnitsConverter.knotsFromKph(Double.valueOf(
-                parser.group(index++).replace(".", "")) / 10));
-
-        // Course
-        position.setCourse(Double.valueOf(parser.group(index++)));
-
-        // Altitude
-        String altitude = parser.group(index++);
-        if (altitude != null) {
-            position.setAltitude(Double.valueOf(altitude));
+        if (parser.hasNext(8)) {
+            position.setLatitude(parser.nextCoordinate(Parser.CoordinateFormat.DEG_MIN_MIN_HEM));
+            position.setLongitude(parser.nextCoordinate(Parser.CoordinateFormat.DEG_MIN_MIN_HEM));
+        }
+        if (parser.hasNext(4)) {
+            position.setLatitude(parser.nextCoordinate(Parser.CoordinateFormat.DEG_HEM));
+            position.setLongitude(parser.nextCoordinate(Parser.CoordinateFormat.DEG_HEM));
         }
 
-        // Additional data
-        position.set(Event.KEY_SATELLITES, parser.group(index++));
-        position.set(Event.KEY_ODOMETER, parser.group(index++));
-        position.set(Event.KEY_IGNITION, parser.group(index++));
-        position.set(Event.PREFIX_IO + 1, parser.group(index++));
-        position.set(Event.PREFIX_IO + 2, parser.group(index++));
-        position.set("immobilizer", parser.group(index++));
-        position.set(Event.KEY_POWER, parser.group(index++));
-        position.set(Event.KEY_GSM, parser.group(index++));
+        position.setSpeed(UnitsConverter.knotsFromKph(Double.parseDouble(
+                parser.next().replace(".", "")) / 10));
 
-        // Validity
-        position.setValid(parser.group(index++).compareTo("A") == 0);
+        position.setCourse(parser.nextDouble());
+        position.setAltitude(parser.nextDouble());
 
-        // RFID
-        position.set(Event.KEY_RFID, parser.group(index++));
+        position.set(Event.KEY_SATELLITES, parser.next());
+        position.set(Event.KEY_ODOMETER, parser.next());
+        position.set(Event.KEY_IGNITION, parser.next());
+        position.set(Event.PREFIX_IO + 1, parser.next());
+        position.set(Event.PREFIX_IO + 2, parser.next());
+        position.set("immobilizer", parser.next());
+        position.set(Event.KEY_POWER, parser.next());
+        position.set(Event.KEY_GSM, parser.next());
+
+        position.setValid(parser.next().equals("A"));
+
+        position.set(Event.KEY_RFID, parser.next());
 
         return position;
     }

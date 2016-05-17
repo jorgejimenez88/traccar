@@ -15,11 +15,6 @@
  */
 package org.traccar.helper;
 
-import java.io.IOException;
-import java.lang.management.ManagementFactory;
-import java.lang.management.MemoryMXBean;
-import java.lang.management.OperatingSystemMXBean;
-import java.lang.management.RuntimeMXBean;
 import org.apache.log4j.Appender;
 import org.apache.log4j.DailyRollingFileAppender;
 import org.apache.log4j.Layout;
@@ -33,25 +28,37 @@ import org.jboss.netty.logging.InternalLogger;
 import org.jboss.netty.logging.InternalLoggerFactory;
 import org.traccar.Config;
 
-public class Log {
-    
+import java.io.IOException;
+import java.lang.management.ManagementFactory;
+import java.lang.management.MemoryMXBean;
+import java.lang.management.OperatingSystemMXBean;
+import java.lang.management.RuntimeMXBean;
+import java.nio.charset.Charset;
+
+public final class Log {
+
+    private Log() {
+    }
+
+    public static final String DATE_FORMAT = "yyyy-MM-dd HH:mm:ss";
+
     private static final String LOGGER_NAME = "traccar";
 
     private static final String STACK_PACKAGE = "org.traccar";
     private static final int STACK_LIMIT = 3;
 
     private static Logger logger = null;
-    
+
     public static void setupLogger(Config config) throws IOException {
 
-        Layout layout = new PatternLayout("%d{yyyy-MM-dd HH:mm:ss} %5p: %m%n");
+        Layout layout = new PatternLayout("%d{" + DATE_FORMAT + "} %5p: %m%n");
 
         Appender appender = new DailyRollingFileAppender(
                 layout, config.getString("logger.file"), "'.'yyyyMMdd");
 
         LogManager.resetConfiguration();
         LogManager.getRootLogger().addAppender(new NullAppender());
-        
+
         logger = Logger.getLogger(LOGGER_NAME);
         logger.addAppender(appender);
         logger.setLevel(Level.toLevel(config.getString("logger.level"), Level.ALL));
@@ -75,30 +82,34 @@ public class Log {
         }
         return logger;
     }
-    
+
     public static void logSystemInfo() {
         try {
             OperatingSystemMXBean operatingSystemBean = ManagementFactory.getOperatingSystemMXBean();
-            Log.info("Operating System" +
-                " name: " + operatingSystemBean.getName() +
-                " version: " + operatingSystemBean.getVersion() +
-                " architecture: " + operatingSystemBean.getArch());
+            Log.info("Operating system"
+                    + " name: " + operatingSystemBean.getName()
+                    + " version: " + operatingSystemBean.getVersion()
+                    + " architecture: " + operatingSystemBean.getArch());
 
             RuntimeMXBean runtimeBean = ManagementFactory.getRuntimeMXBean();
-            Log.info("Java Runtime" +
-                " name: " + runtimeBean.getVmName() +
-                " vendor: " + runtimeBean.getVmVendor() +
-                " version: " + runtimeBean.getVmVersion());
+            Log.info("Java runtime"
+                    + " name: " + runtimeBean.getVmName()
+                    + " vendor: " + runtimeBean.getVmVendor()
+                    + " version: " + runtimeBean.getVmVersion());
 
             MemoryMXBean memoryBean = ManagementFactory.getMemoryMXBean();
-            Log.info("Memory Limit" +
-                " heap: " + memoryBean.getHeapMemoryUsage().getMax() / (1024 * 1024) + "mb" +
-                " non-heap: " + memoryBean.getNonHeapMemoryUsage().getMax() / (1024 * 1024) + "mb");
-        } catch (Exception e) {
+            Log.info("Memory limit"
+                    + " heap: " + memoryBean.getHeapMemoryUsage().getMax() / (1024 * 1024) + "mb"
+                    + " non-heap: " + memoryBean.getNonHeapMemoryUsage().getMax() / (1024 * 1024) + "mb");
+
+            Log.info("Character encoding: "
+                    + System.getProperty("file.encoding") + " charset: " + Charset.defaultCharset());
+
+        } catch (Exception error) {
             Log.warning("Failed to get system info");
         }
     }
-    
+
     public static void error(String msg) {
         getLogger().error(msg);
     }
@@ -163,13 +174,13 @@ public class Log {
                     }
 
                     if (file.equals(element.getFileName())) {
-                        s.append("*:");
+                        s.append("*");
                     } else {
                         file = element.getFileName();
-                        s.append(file).append(":");
+                        s.append(file.substring(0, file.length() - 5)); // remove ".java"
                         count -= 1;
                     }
-                    s.append(element.getLineNumber());
+                    s.append(":").append(element.getLineNumber());
                 } else {
                     skip = true;
                 }

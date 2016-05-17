@@ -15,7 +15,6 @@ fi
 VERSION=$1
 
 check_requirement () {
-  eval $1 &>/dev/null
   if ! eval $1 &>/dev/null
   then
     echo $2
@@ -23,9 +22,11 @@ check_requirement () {
   fi 
 }
 
+check_requirement "ls ../../ext-6.0.1" "Missing ../../ext-6.0.1 (https://www.sencha.com/legal/GPL/)"
 check_requirement "ls wrapper-delta-pack-*.tar.gz" "Missing wrapper-delta-pack-*.tar.gz (http://wrapper.tanukisoftware.com/doc/english/download.jsp)"
 check_requirement "ls wrapper-windows-x86-64-*.zip" "Missing wrapper-windows-x86-64-*.zip (http://www.krenger.ch/blog/tag/java-service-wrapper/)"
-check_requirement "ls isetup-*.exe" "Missing isetup-*.exe (http://www.jrsoftware.org/isdl.php)"
+check_requirement "ls innosetup-*.exe" "Missing isetup-*.exe (http://www.jrsoftware.org/isdl.php)"
+check_requirement "which sencha" "Missing sencha cmd package (https://www.sencha.com/products/extjs/cmd-download/)"
 check_requirement "which wine" "Missing wine package"
 check_requirement "which innoextract" "Missing innoextract package"
 check_requirement "which makeself" "Missing makeself package"
@@ -37,7 +38,7 @@ prepare () {
 
   ../tools/minify.sh
 
-  innoextract isetup-*.exe
+  innoextract innosetup-*.exe
   echo "If you got any errors here try isetup version 5.5.5 (or check what versions are supported by 'innoextract -v')"
 }
 
@@ -52,10 +53,10 @@ cleanup () {
 
 prepare_windows_64 () {
   unzip wrapper-windows-x86-64-*.zip
-  cp wrapper_*_src/bin/wrapper.exe wrapper/bin/wrapper-windows-x86-32.exe
-  cp wrapper_*_src/lib/wrapper.dll wrapper/lib/wrapper-windows-x86-32.dll
-  cp wrapper_*_src/lib/wrapper.jar wrapper/lib/wrapper.jar
-  rm -rf wrapper_*_src
+  cp wrapper-windows-*/bin/wrapper.exe wrapper/bin/wrapper-windows-x86-32.exe
+  cp wrapper-windows-*/lib/wrapper.dll wrapper/lib/wrapper-windows-x86-32.dll
+  cp wrapper-windows-*/lib/wrapper.jar wrapper/lib/wrapper.jar
+  rm -rf wrapper-windows-*/
 }
 
 prepare_linux_32 () {
@@ -112,6 +113,7 @@ package_unix () {
 
   cp ../target/tracker-server.jar out
   cp ../target/lib/* out/lib
+  cp ../database/* out/data
   cp -r ../web/* out/web
   cp unix/traccar.xml out/conf
 
@@ -120,6 +122,7 @@ package_unix () {
 
   sed -i '/wrapper.java.classpath.1/i\wrapper.java.classpath.2=../tracker-server.jar' out/conf/wrapper.conf
   sed -i '/wrapper.app.parameter.1/i\wrapper.app.parameter.2=../conf/traccar.xml' out/conf/wrapper.conf
+  sed -i 's/wrapper.java.additional.1=/wrapper.java.additional.1=-Dfile.encoding=UTF-8/g' out/conf/wrapper.conf
   sed -i 's/<YourMainClass>/org.traccar.Main/g' out/conf/wrapper.conf
   sed -i 's/@app.name@/traccar/g' out/conf/wrapper.conf
   sed -i 's/@app.long.name@/traccar/g' out/conf/wrapper.conf
@@ -128,7 +131,7 @@ package_unix () {
 
   eval $2
 
-  makeself out traccar.run "traccar" ./setup.sh
+  makeself out traccar.run "traccar" "chmod +x setup.sh ; ./setup.sh"
   zip -j traccar-$1-$VERSION.zip traccar.run README.txt
 
   rm traccar.run
@@ -141,6 +144,7 @@ package_universal () {
 
   cp ../target/tracker-server.jar out
   cp ../target/lib/* out/lib
+  cp ../database/* out/data
   cp -r ../web/* out/web
   cp windows/traccar.xml out/conf
   cp README.txt out

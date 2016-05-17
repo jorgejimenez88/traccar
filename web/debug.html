@@ -4,20 +4,22 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>Traccar</title>
-<style>
-.state-indicator { position: absolute; top: -999em; left: -999em; z-index: 0; }
-@media all and (max-device-width: 768px) { .state-indicator { z-index: 1; } }
-</style>
-<link rel="stylesheet" href="//cdnjs.cloudflare.com/ajax/libs/extjs/6.0.0/classic/theme-neptune/resources/theme-neptune-all.css">
-<link rel="stylesheet" href="//cdnjs.cloudflare.com/ajax/libs/ol3/3.7.0/ol.css">
-<link rel="stylesheet" href="//cdnjs.cloudflare.com/ajax/libs/font-awesome/4.3.0/css/font-awesome.min.css">
-<script src="//cdnjs.cloudflare.com/ajax/libs/extjs/6.0.0/ext-all-debug.js"></script>
-<script src="//cdnjs.cloudflare.com/ajax/libs/extjs/6.0.0/classic/theme-neptune/theme-neptune.js"></script>
-<script src="//cdnjs.cloudflare.com/ajax/libs/ol3/3.7.0/ol-debug.js"></script>
-<script src="locale.js"></script>
-<script src="app.js"></script>
+<link rel="stylesheet" href="//cdnjs.cloudflare.com/ajax/libs/extjs/6.0.1/classic/theme-neptune/resources/theme-neptune-all.css">
+<link rel="stylesheet" href="//cdnjs.cloudflare.com/ajax/libs/ol3/3.15.1/ol.css">
+<link rel="stylesheet" href="//cdnjs.cloudflare.com/ajax/libs/font-awesome/4.6.1/css/font-awesome.min.css">
+<link rel="stylesheet" href="app.css">
 </head>
 <body>
-<div style="position: fixed; bottom: 10px; right: 15px; font-size: x-small;">Powered by <a href="https://www.traccar.org/">Traccar GPS Tracking System</a></div>
+<div id="spinner"></div>
+<div id="attribution">Powered by <a href="https://www.traccar.org/">Traccar GPS Tracking System</a></div>
+<script src="//cdnjs.cloudflare.com/ajax/libs/extjs/6.0.1/ext-all-debug.js"></script>
+<script src="//cdnjs.cloudflare.com/ajax/libs/extjs/6.0.1/classic/theme-neptune/theme-neptune.js"></script>
+<script src="//cdnjs.cloudflare.com/ajax/libs/ol3/3.15.1/ol-debug.js"></script>
+<script src="arrowstyle.js"></script>
+<script type="text/javascript">
+Ext.Loader.setConfig({ disableCaching: false });
+</script>
+<script src="locale.js"></script>
+<script src="app.js"></script>
 </body>
 </html>

@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 - 2014 Anton Tananaev (anton.tananaev@gmail.com)
+ * Copyright 2013 - 2015 Anton Tananaev (anton.tananaev@gmail.com)
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,18 +15,17 @@
  */
 package org.traccar.protocol;
 
-import java.net.SocketAddress;
-import java.util.Calendar; 
-import java.util.TimeZone;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-
 import org.jboss.netty.channel.Channel;
-import org.jboss.netty.channel.ChannelHandlerContext;
-
 import org.traccar.BaseProtocolDecoder;
+import org.traccar.helper.DateBuilder;
+import org.traccar.helper.Parser;
+import org.traccar.helper.PatternBuilder;
+import org.traccar.helper.UnitsConverter;
 import org.traccar.model.Event;
 import org.traccar.model.Position;
+
+import java.net.SocketAddress;
+import java.util.regex.Pattern;
 
 public class TotemProtocolDecoder extends BaseProtocolDecoder {
 
@@ -34,286 +33,265 @@ public class TotemProtocolDecoder extends BaseProtocolDecoder {
         super(protocol);
     }
 
-    private static final Pattern patternFirst = Pattern.compile(
-            "\\$\\$" +                          // Header
-            "\\p{XDigit}{2}" +                  // Length
-            "(\\d+)\\|" +                       // IMEI
-            "(..)" +                            // Alarm Type
-            "\\$GPRMC," +
-            "(\\d{2})(\\d{2})(\\d{2})\\.\\d+," + // Time (HHMMSS.SS)
-            "([AV])," +                         // Validity
-            "(\\d+)(\\d{2}\\.\\d+)," +          // Latitude (DDMM.MMMM)
-            "([NS])," +
-            "(\\d+)(\\d{2}\\.\\d+)," +          // Longitude (DDDMM.MMMM)
-            "([EW])," +
-            "(\\d+\\.?\\d*)?," +                // Speed
-            "(\\d+\\.?\\d*)?," +                // Course
-            "(\\d{2})(\\d{2})(\\d{2})" +        // Date (DDMMYY)
-            "[^\\*]+\\*\\p{XDigit}{2}\\|" +     // Checksum
-            "\\d+\\.\\d+\\|" +                  // PDOP
-            "(\\d+\\.\\d+)\\|" +                // HDOP
-            "\\d+\\.\\d+\\|" +                  // VDOP
-            "(\\d+)\\|" +                       // IO Status
-            "\\d+\\|" +                         // Time
-            "\\d" +                             // Charged
-            "(\\d{3})" +                        // Battery
-            "(\\d{4})\\|" +                     // External Power
-            "(?:(\\d+)\\|)?" +                  // ADC
-            "(\\p{XDigit}{8})\\|" +             // Location Code
-            "(\\d+)\\|" +                       // Temperature
-            "(\\d+.\\d+)\\|" +                  // Odometer
-            "\\d+\\|" +                         // Serial Number
-            ".*\\|?" +
-            "\\p{XDigit}{4}" +                  // Checksum
-            "\r?\n?");
+    private static final Pattern PATTERN1 = new PatternBuilder()
+            .text("$$")                          // header
+            .number("xx")                        // length
+            .number("(d+)|")                     // imei
+            .expression("(..)")                  // alarm
+            .text("$GPRMC,")
+            .number("(dd)(dd)(dd).d+,")          // time
+            .expression("([AV]),")               // validity
+            .number("(d+)(dd.d+),([NS]),")       // latitude
+            .number("(d+)(dd.d+),([EW]),")       // longitude
+            .number("(d+.?d*)?,")                // speed
+            .number("(d+.?d*)?,")                // course
+            .number("(dd)(dd)(dd)")              // date
+            .expression("[^*]*").text("*")
+            .number("xx|")                       // checksum
+            .number("d+.d+|")                    // pdop
+            .number("(d+.d+)|")                  // hdop
+            .number("d+.d+|")                    // vdop
+            .number("(d+)|")                     // io status
+            .number("d+|")                       // time
+            .number("d")                         // charged
+            .number("(ddd)")                     // battery
+            .number("(dddd)|")                   // power
+            .number("(d+)|").optional()          // adc
+            .number("x*(xxxx)")                  // lac
+            .number("(xxxx)|")                   // cid
+            .number("(d+)|")                     // temperature
+            .number("(d+.d+)|")                  // odometer
+            .number("d+|")                       // serial number
+            .any()
+            .number("xxxx")                      // checksum
+            .any()
+            .compile();
 
-    private static final Pattern patternSecond = Pattern.compile(
-            "\\$\\$" +                          // Header
-            "\\p{XDigit}{2}" +                  // Length
-            "(\\d+)\\|" +                       // IMEI
-            "(..)" +                            // Alarm Type
-            "(\\d{2})(\\d{2})(\\d{2})" +        // Date (DDMMYY)
-            "(\\d{2})(\\d{2})(\\d{2})\\|" +     // Time (HHMMSS)
-            "([AV])\\|" +                       // Validity
-            "(\\d+)(\\d{2}\\.\\d+)\\|" +        // Latitude (DDMM.MMMM)
-            "([NS])\\|" +
-            "(\\d+)(\\d{2}\\.\\d+)\\|" +        // Longitude (DDDMM.MMMM)
-            "([EW])\\|" +
-            "(\\d+\\.\\d+)?\\|" +               // Speed
-            "(\\d+)?\\|" +                      // Course
-            "(\\d+\\.\\d+)\\|" +                // HDOP
-            "(\\d+)\\|" +                       // IO Status
-            "\\d" +                             // Charged
-            "(\\d{2})" +                        // Battery
-            "(\\d{2})\\|" +                     // External Power
-            "(\\d+)\\|" +                       // ADC
-            "(\\p{XDigit}{8})\\|" +             // Location Code
-            "(\\d+)\\|" +                       // Temperature
-            "(\\d+.\\d+)\\|" +                  // Odometer
-            "\\d+\\|" +                         // Serial Number
-            "\\p{XDigit}{4}" +                  // Checksum
-            "\r?\n?");
+    private static final Pattern PATTERN2 = new PatternBuilder()
+            .text("$$")                          // header
+            .number("xx")                        // length
+            .number("(d+)|")                     // imei
+            .expression("(..)")                  // alarm type
+            .number("(dd)(dd)(dd)")              // date (ddmmyy)
+            .number("(dd)(dd)(dd)|")             // time
+            .expression("([AV])|")               // validity
+            .number("(d+)(dd.d+)|")              // latitude
+            .expression("([NS])|")
+            .number("(d+)(dd.d+)|")              // longitude
+            .expression("([EW])|")
+            .number("(d+.d+)?|")                 // speed
+            .number("(d+)?|")                    // course
+            .number("(d+.d+)|")                  // hdop
+            .number("(d+)|")                     // io status
+            .number("d")                         // charged
+            .number("(dd)")                      // battery
+            .number("(dd)|")                     // external power
+            .number("(d+)|")                     // adc
+            .number("(xxxx)")                    // lac
+            .number("(xxxx)|")                   // cid
+            .number("(d+)|")                     // temperature
+            .number("(d+.d+)|")                  // odometer
+            .number("d+|")                       // serial number
+            .number("xxxx")                      // checksum
+            .any()
+            .compile();
 
-    private static final Pattern patternThird = Pattern.compile(
-            "\\$\\$" +                          // Header
-            "\\p{XDigit}{2}" +                  // Length
-            "(\\d+)\\|" +                       // IMEI
-            "(..)" +                            // Alarm Type
-            "(\\d{2})(\\d{2})(\\d{2})" +        // Date (YYMMDD)
-            "(\\d{2})(\\d{2})(\\d{2})" +        // Time (HHMMSS)
-            "(\\p{XDigit}{4})" +                // IO Status
-            "[01]" +                            // Charging
-            "(\\d{2})" +                        // Battery
-            "(\\d{2})" +                        // External Power
-            "(\\d{4})" +                        // ADC 1
-            "(\\d{4})" +                        // ADC 2
-            "(\\d{3})" +                        // Temperature 1
-            "(\\d{3})" +                        // Temperature 2
-            "(\\p{XDigit}{8})" +                // Location Code
-            "([AV])" +                          // Validity
-            "(\\d{2})" +                        // Satellites
-            "(\\d{3})" +                        // Course
-            "(\\d{3})" +                        // Speed
-            "(\\d{2}\\.\\d)" +                  // PDOP
-            "(\\d{7})" +                        // Odometer
-            "(\\d{2})(\\d{2}\\.\\d{4})" +       // Latitude (DDMM.MMMM)
-            "([NS])" +
-            "(\\d{3})(\\d{2}\\.\\d{4})" +       // Longitude (DDDMM.MMMM)
-            "([EW])" +
-            "\\d{4}" +                          // Serial Number
-            "\\p{XDigit}{4}" +                  // Checksum
-            "\r?\n?");
+    private static final Pattern PATTERN3 = new PatternBuilder()
+            .text("$$")                          // header
+            .number("xx")                        // length
+            .number("(d+)|")                     // imei
+            .expression("(..)")                  // alarm type
+            .number("(dd)(dd)(dd)")              // date (yymmdd)
+            .number("(dd)(dd)(dd)")              // time
+            .number("(xxxx)")                    // io status
+            .expression("[01]")                  // charging
+            .number("(dd)")                      // battery
+            .number("(dd)")                      // external power
+            .number("(dddd)")                    // adc 1
+            .number("(dddd)")                    // adc 2
+            .number("(ddd)")                     // temperature 1
+            .number("(ddd)")                     // temperature 2
+            .number("(xxxx)")                    // lac
+            .number("(xxxx)")                    // cid
+            .expression("([AV])")                // validity
+            .number("(dd)")                      // satellites
+            .number("(ddd)")                     // course
+            .number("(ddd)")                     // speed
+            .number("(dd.d)")                    // pdop
+            .number("(d{7})")                    // odometer
+            .number("(dd)(dd.dddd)([NS])")       // latitude
+            .number("(ddd)(dd.dddd)([EW])")      // longitude
+            .number("dddd")                      // serial number
+            .number("xxxx")                      // checksum
+            .any()
+            .compile();
 
-    private enum MessageFormat {
-        first,
-        second,
-        third
-    }
-    
+    private static final Pattern PATTERN4 = new PatternBuilder()
+            .text("$$")                          // header
+            .number("dddd")                      // length
+            .text("AA")                          // type
+            .number("(d+)|")                     // imei
+            .number("(x{8})")                    // status
+            .number("(dd)(dd)(dd)")              // date (yymmdd)
+            .number("(dd)(dd)(dd)")              // time
+            .number("(dd)")                      // battery
+            .number("(dd)")                      // external power
+            .number("(dddd)")                    // adc 1
+            .number("(xxxx)")                    // lac
+            .number("(xxxx)")                    // cid
+            .number("(dd)")                      // satellites
+            .number("(dd)")                      // gsm
+            .number("(ddd)")                     // course
+            .number("(ddd)")                     // speed
+            .number("(dd.d)")                    // hdop
+            .number("(d{7})")                    // odometer
+            .number("(dd)(dd.dddd)([NS])")       // latitude
+            .number("(ddd)(dd.dddd)([EW])")      // longitude
+            .number("dddd")                      // serial number
+            .number("xx")                        // checksum
+            .any()
+            .compile();
+
     @Override
     protected Object decode(
-            Channel channel, SocketAddress remoteAddress, Object msg)
-            throws Exception {
-        
+            Channel channel, SocketAddress remoteAddress, Object msg) throws Exception {
+
         String sentence = (String) msg;
 
         // Determine format
-        MessageFormat format = MessageFormat.third;
-        if (sentence.contains("$GPRMC")) {
-            format = MessageFormat.first;
+        Pattern pattern = PATTERN3;
+        if (sentence.indexOf("AA") == 6) {
+            pattern = PATTERN4;
+        } else if (sentence.contains("$GPRMC")) {
+            pattern = PATTERN1;
         } else {
             int index = sentence.indexOf('|');
             if (index != -1 && sentence.indexOf('|', index + 1) != -1) {
-                format = MessageFormat.second;
+                pattern = PATTERN2;
             }
         }
 
-        // Parse message
-        Matcher parser = null;
-        if (format == MessageFormat.first) {
-            parser = patternFirst.matcher(sentence);
-        } else if (format == MessageFormat.second) {
-            parser = patternSecond.matcher(sentence);
-        } else if (format == MessageFormat.third) {
-            parser = patternThird.matcher(sentence);
-        }
+        Parser parser = new Parser(pattern, sentence);
         if (!parser.matches()) {
             return null;
         }
 
-        // Create new position
         Position position = new Position();
         position.setProtocol(getProtocolName());
 
-        Integer index = 1;
-
-        // Get device by IMEI
-        if (!identify(parser.group(index++), channel)) {
+        if (!identify(parser.next(), channel, remoteAddress)) {
             return null;
         }
         position.setDeviceId(getDeviceId());
-        
-        // Alarm type
-        position.set(Event.KEY_ALARM, parser.group(index++));
-        
-        if (format == MessageFormat.first || format == MessageFormat.second) {
 
-            // Time
-            Calendar time = Calendar.getInstance(TimeZone.getTimeZone("UTC"));
-            time.clear();
+        if (pattern == PATTERN1 || pattern == PATTERN2) {
+
+            position.set(Event.KEY_ALARM, parser.next());
+
+            DateBuilder dateBuilder = new DateBuilder();
             int year = 0;
-            if (format == MessageFormat.second) {
-                time.set(Calendar.DAY_OF_MONTH, Integer.valueOf(parser.group(index++)));
-                time.set(Calendar.MONTH, Integer.valueOf(parser.group(index++)) - 1);
-                year = Integer.valueOf(parser.group(index++));
-                time.set(Calendar.YEAR, 2000 + year);
+            if (pattern == PATTERN2) {
+                dateBuilder.setDay(parser.nextInt()).setMonth(parser.nextInt());
+                year = parser.nextInt();
+                dateBuilder.setYear(year);
             }
-            time.set(Calendar.HOUR_OF_DAY, Integer.valueOf(parser.group(index++)));
-            time.set(Calendar.MINUTE, Integer.valueOf(parser.group(index++)));
-            time.set(Calendar.SECOND, Integer.valueOf(parser.group(index++)));
+            dateBuilder.setTime(parser.nextInt(), parser.nextInt(), parser.nextInt());
 
-            // Validity
-            position.setValid(parser.group(index++).compareTo("A") == 0);
+            position.setValid(parser.next().equals("A"));
+            position.setLatitude(parser.nextCoordinate());
+            position.setLongitude(parser.nextCoordinate());
+            position.setSpeed(parser.nextDouble());
+            position.setCourse(parser.nextDouble());
 
-            // Latitude
-            Double latitude = Double.valueOf(parser.group(index++));
-            latitude += Double.valueOf(parser.group(index++)) / 60;
-            if (parser.group(index++).compareTo("S") == 0) latitude = -latitude;
-            position.setLatitude(latitude);
-
-            // Longitude
-            Double longitude = Double.valueOf(parser.group(index++));
-            longitude += Double.valueOf(parser.group(index++)) / 60;
-            if (parser.group(index++).compareTo("W") == 0) longitude = -longitude;
-            position.setLongitude(longitude);
-
-            // Speed
-            String speed = parser.group(index++);
-            if (speed != null) {
-                position.setSpeed(Double.valueOf(speed));
-            }
-
-            // Course
-            String course = parser.group(index++);
-            if (course != null) {
-                position.setCourse(Double.valueOf(course));
-            }
-
-            // Date
-            if (format == MessageFormat.first) {
-                time.set(Calendar.DAY_OF_MONTH, Integer.valueOf(parser.group(index++)));
-                time.set(Calendar.MONTH, Integer.valueOf(parser.group(index++)) - 1);
-                year = Integer.valueOf(parser.group(index++));
-                time.set(Calendar.YEAR, 2000 + year);
+            if (pattern == PATTERN1) {
+                dateBuilder.setDay(parser.nextInt()).setMonth(parser.nextInt());
+                year = parser.nextInt();
+                dateBuilder.setYear(year);
             }
             if (year == 0) {
                 return null; // ignore invalid data
             }
-            position.setTime(time.getTime());
+            position.setTime(dateBuilder.getDate());
 
-            // Accuracy
-            position.set(Event.KEY_HDOP, parser.group(index++));
+            position.set(Event.KEY_HDOP, parser.next());
+            position.set(Event.PREFIX_IO + 1, parser.next());
+            position.set(Event.KEY_BATTERY, parser.next());
+            position.set(Event.KEY_POWER, parser.nextDouble());
+            position.set(Event.PREFIX_ADC + 1, parser.next());
 
-            // IO Status
-            position.set(Event.PREFIX_IO + 1, parser.group(index++));
+            int lac = parser.nextInt(16);
+            int cid = parser.nextInt(16);
+            if (lac != 0 && cid != 0) {
+                position.set(Event.KEY_LAC, lac);
+                position.set(Event.KEY_CID, cid);
+            }
 
-            // Power
-            position.set(Event.KEY_BATTERY, parser.group(index++));
-            position.set(Event.KEY_POWER, Double.valueOf(parser.group(index++)));
+            position.set(Event.PREFIX_TEMP + 1, parser.next());
+            position.set(Event.KEY_ODOMETER, parser.next());
 
-            // ADC
-            position.set(Event.PREFIX_ADC + 1, parser.group(index++));
+        } else if (pattern == PATTERN3) {
 
-            // Location Code
-            position.set(Event.KEY_LAC, parser.group(index++));
+            position.set(Event.KEY_ALARM, parser.next());
 
-            // Temperature
-            position.set(Event.PREFIX_TEMP + 1, parser.group(index++));
+            DateBuilder dateBuilder = new DateBuilder()
+                    .setDateReverse(parser.nextInt(), parser.nextInt(), parser.nextInt())
+                    .setTime(parser.nextInt(), parser.nextInt(), parser.nextInt());
+            position.setTime(dateBuilder.getDate());
 
-            // Odometer
-            position.set(Event.KEY_ODOMETER, parser.group(index++));
-        
-        } else if (format == MessageFormat.third) {
+            position.set(Event.PREFIX_IO + 1, parser.next());
+            position.set(Event.KEY_BATTERY, parser.nextDouble() / 10);
+            position.set(Event.KEY_POWER, parser.nextDouble());
+            position.set(Event.PREFIX_ADC + 1, parser.next());
+            position.set(Event.PREFIX_ADC + 2, parser.next());
+            position.set(Event.PREFIX_TEMP + 1, parser.next());
+            position.set(Event.PREFIX_TEMP + 2, parser.next());
+            position.set(Event.KEY_LAC, parser.nextInt(16));
+            position.set(Event.KEY_CID, parser.nextInt(16));
 
-            // Time
-            Calendar time = Calendar.getInstance(TimeZone.getTimeZone("UTC"));
-            time.clear();
-            time.set(Calendar.YEAR, 2000 + Integer.valueOf(parser.group(index++)));
-            time.set(Calendar.MONTH, Integer.valueOf(parser.group(index++)) - 1);
-            time.set(Calendar.DAY_OF_MONTH, Integer.valueOf(parser.group(index++)));
-            time.set(Calendar.HOUR_OF_DAY, Integer.valueOf(parser.group(index++)));
-            time.set(Calendar.MINUTE, Integer.valueOf(parser.group(index++)));
-            time.set(Calendar.SECOND, Integer.valueOf(parser.group(index++)));
-            position.setTime(time.getTime());
-            
-            // IO Status
-            position.set(Event.PREFIX_IO + 1, parser.group(index++));
+            position.setValid(parser.next().equals("A"));
+            position.set(Event.KEY_SATELLITES, parser.next());
 
-            // Power
-            position.set(Event.KEY_BATTERY, Double.valueOf(parser.group(index++)) / 10);
-            position.set(Event.KEY_POWER, Double.valueOf(parser.group(index++)));
+            position.setCourse(parser.nextDouble());
+            position.setSpeed(parser.nextDouble());
 
-            // ADC
-            position.set(Event.PREFIX_ADC + 1, parser.group(index++));
-            position.set(Event.PREFIX_ADC + 2, parser.group(index++));
+            position.set("pdop", parser.next());
 
-            // Temperature
-            position.set(Event.PREFIX_TEMP + 1, parser.group(index++));
-            position.set(Event.PREFIX_TEMP + 2, parser.group(index++));
+            position.set(Event.KEY_ODOMETER, parser.next());
 
-            // Location Code
-            position.set(Event.KEY_LAC, parser.group(index++));
+            position.setLatitude(parser.nextCoordinate());
+            position.setLongitude(parser.nextCoordinate());
 
-            // Validity
-            position.setValid(parser.group(index++).compareTo("A") == 0);
+        } else if (pattern == PATTERN4) {
 
-            // Satellites
-            position.set(Event.KEY_SATELLITES, parser.group(index++));
+            position.set(Event.KEY_STATUS, parser.next());
 
-            // Course
-            position.setCourse(Double.valueOf(parser.group(index++)));
+            DateBuilder dateBuilder = new DateBuilder()
+                    .setDate(parser.nextInt(), parser.nextInt(), parser.nextInt())
+                    .setTime(parser.nextInt(), parser.nextInt(), parser.nextInt());
+            position.setTime(dateBuilder.getDate());
 
-            // Speed
-            position.setSpeed(Double.valueOf(parser.group(index++)));
+            position.set(Event.KEY_BATTERY, parser.nextDouble() / 10);
+            position.set(Event.KEY_POWER, parser.nextDouble());
+            position.set(Event.PREFIX_ADC + 1, parser.next());
+            position.set(Event.KEY_LAC, parser.nextInt(16));
+            position.set(Event.KEY_CID, parser.nextInt(16));
+            position.set(Event.KEY_SATELLITES, parser.nextInt());
+            position.set(Event.KEY_GSM, parser.nextInt());
 
-            // PDOP
-            position.set("pdop", parser.group(index++));
+            position.setCourse(parser.nextDouble());
+            position.setSpeed(UnitsConverter.knotsFromKph(parser.nextDouble()));
 
-            // Odometer
-            position.set(Event.KEY_ODOMETER, parser.group(index++));
+            position.set(Event.KEY_HDOP, parser.nextDouble());
+            position.set(Event.KEY_ODOMETER, parser.nextInt());
 
-            // Latitude
-            Double latitude = Double.valueOf(parser.group(index++));
-            latitude += Double.valueOf(parser.group(index++)) / 60;
-            if (parser.group(index++).compareTo("S") == 0) latitude = -latitude;
-            position.setLatitude(latitude);
+            position.setValid(true);
+            position.setLatitude(parser.nextCoordinate());
+            position.setLongitude(parser.nextCoordinate());
 
-            // Longitude
-            Double longitude = Double.valueOf(parser.group(index++));
-            longitude += Double.valueOf(parser.group(index++)) / 60;
-            if (parser.group(index++).compareTo("W") == 0) longitude = -longitude;
-            position.setLongitude(longitude);
-        
+        }
+
+        if (channel != null) {
+            channel.write("ACK OK\r\n");
         }
 
         return position;

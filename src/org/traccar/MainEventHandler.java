@@ -20,37 +20,44 @@ import org.jboss.netty.channel.ChannelHandlerContext;
 import org.jboss.netty.channel.ChannelStateEvent;
 import org.jboss.netty.channel.ExceptionEvent;
 import org.jboss.netty.channel.MessageEvent;
+import org.jboss.netty.channel.socket.DatagramChannel;
 import org.jboss.netty.handler.timeout.IdleStateAwareChannelHandler;
 import org.jboss.netty.handler.timeout.IdleStateEvent;
 import org.traccar.helper.Log;
 import org.traccar.model.Position;
 
+import java.text.SimpleDateFormat;
+
 public class MainEventHandler extends IdleStateAwareChannelHandler {
 
     @Override
     public void messageReceived(ChannelHandlerContext ctx, MessageEvent e) {
-        
-        if (e.getMessage() != null) {
-            if (e.getMessage() instanceof Position) {
 
-                Position position = (Position) e.getMessage();
+        if (e.getMessage() != null && e.getMessage() instanceof Position) {
 
-                // Log position
-                StringBuilder s = new StringBuilder();
-                s.append(formatChannel(e.getChannel())).append(" ");
-                s.append("id: ").append(position.getDeviceId()).append(", ");
-                s.append("time: ").append(position.getFixTime()).append(", ");
-                s.append("lat: ").append(position.getLatitude()).append(", ");
-                s.append("lon: ").append(position.getLongitude()).append(", ");
-                s.append("speed: ").append(position.getSpeed()).append(", ");
-                s.append("course: ").append(position.getCourse());
-                Log.info(s.toString());
+            Position position = (Position) e.getMessage();
 
-                Context.getConnectionManager().update(position);
+            String uniqueId = Context.getDataManager().getDeviceById(position.getDeviceId()).getUniqueId();
+
+            // Log position
+            StringBuilder s = new StringBuilder();
+            s.append(formatChannel(e.getChannel())).append(" ");
+            s.append("id: ").append(uniqueId).append(", ");
+            s.append("time: ").append(
+                    new SimpleDateFormat(Log.DATE_FORMAT).format(position.getFixTime())).append(", ");
+            s.append("lat: ").append(String.format("%.5f", position.getLatitude())).append(", ");
+            s.append("lon: ").append(String.format("%.5f", position.getLongitude())).append(", ");
+            s.append("speed: ").append(String.format("%.1f", position.getSpeed())).append(", ");
+            s.append("course: ").append(String.format("%.1f", position.getCourse()));
+            Log.info(s.toString());
+
+            Position lastPosition = Context.getConnectionManager().getLastPosition(position.getDeviceId());
+            if (lastPosition == null || position.getFixTime().compareTo(lastPosition.getFixTime()) > 0) {
+                Context.getConnectionManager().updatePosition(position);
             }
         }
     }
-    
+
     private static String formatChannel(Channel channel) {
         return String.format("[%08X]", channel.getId());
     }
@@ -63,21 +70,28 @@ public class MainEventHandler extends IdleStateAwareChannelHandler {
     @Override
     public void channelDisconnected(ChannelHandlerContext ctx, ChannelStateEvent e) {
         Log.info(formatChannel(e.getChannel()) + " disconnected");
-        e.getChannel().close();
-        
-        Context.getConnectionManager().removeActiveDevice(e.getChannel());
+        closeChannel(e.getChannel());
+
+        if (ctx.getPipeline().get("httpDecoder") == null) {
+            Context.getConnectionManager().removeActiveDevice(e.getChannel());
+        }
     }
 
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, ExceptionEvent e) {
         Log.warning(formatChannel(e.getChannel()) + " error", e.getCause());
-        e.getChannel().close();
+        closeChannel(e.getChannel());
     }
 
     @Override
     public void channelIdle(ChannelHandlerContext ctx, IdleStateEvent e) {
         Log.info(formatChannel(e.getChannel()) + " timed out");
-        e.getChannel().close();
+        closeChannel(e.getChannel());
     }
 
+    private void closeChannel(Channel channel) {
+        if (!(channel instanceof DatagramChannel)) {
+            channel.close();
+        }
+    }
 }

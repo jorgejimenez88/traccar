@@ -15,18 +15,16 @@
  */
 package org.traccar.protocol;
 
-import java.net.SocketAddress;
-import java.util.Calendar; 
-import java.util.Date;
-import java.util.TimeZone;
 import org.jboss.netty.buffer.ChannelBuffer;
 import org.jboss.netty.channel.Channel;
-import org.jboss.netty.channel.ChannelHandlerContext;
 import org.traccar.BaseProtocolDecoder;
 import org.traccar.helper.BitUtil;
+import org.traccar.helper.DateBuilder;
 import org.traccar.helper.UnitsConverter;
 import org.traccar.model.Event;
 import org.traccar.model.Position;
+
+import java.net.SocketAddress;
 
 public class MxtProtocolDecoder extends BaseProtocolDecoder {
 
@@ -34,14 +32,13 @@ public class MxtProtocolDecoder extends BaseProtocolDecoder {
         super(protocol);
     }
 
-    private static final int MSG_ACK = 0x02;
-    private static final int MSG_NACK = 0x03;
-    private static final int MSG_POSITION = 0x31;
+    public static final int MSG_ACK = 0x02;
+    public static final int MSG_NACK = 0x03;
+    public static final int MSG_POSITION = 0x31;
 
     @Override
     protected Object decode(
-            Channel channel, SocketAddress remoteAddress, Object msg)
-            throws Exception {
+            Channel channel, SocketAddress remoteAddress, Object msg) throws Exception {
 
         ChannelBuffer buf = (ChannelBuffer) msg;
 
@@ -50,7 +47,7 @@ public class MxtProtocolDecoder extends BaseProtocolDecoder {
         int type = buf.readUnsignedByte();
 
         String id = String.valueOf(buf.readUnsignedInt());
-        if (!identify(id, channel)) {
+        if (!identify(id, channel, remoteAddress)) {
             return null;
         }
 
@@ -65,26 +62,19 @@ public class MxtProtocolDecoder extends BaseProtocolDecoder {
 
             position.set(Event.KEY_INDEX, buf.readUnsignedShort());
 
-            // Date and time
-            Calendar time = Calendar.getInstance(TimeZone.getTimeZone("UTC"));
-            time.clear();
-            time.set(Calendar.YEAR, 2000);
-            time.set(Calendar.MONTH, 0);
-            time.set(Calendar.DAY_OF_MONTH, 1);
+            DateBuilder dateBuilder = new DateBuilder().setDate(2000, 1, 1);
 
             long date = buf.readUnsignedInt();
 
-            long days = BitUtil.range(date, 6 + 6 + 5);
-            long hours = BitUtil.range(date, 6 + 6, 5);
-            long minutes = BitUtil.range(date, 6, 6);
-            long seconds = BitUtil.range(date, 0, 6);
+            long days = BitUtil.from(date, 6 + 6 + 5);
+            long hours = BitUtil.between(date, 6 + 6, 6 + 6 + 5);
+            long minutes = BitUtil.between(date, 6, 6 + 6);
+            long seconds = BitUtil.to(date, 6);
 
-            long millis = time.getTimeInMillis();
-            millis += (((days * 24 + hours) * 60 + minutes) * 60 + seconds) * 1000;
+            dateBuilder.addMillis((((days * 24 + hours) * 60 + minutes) * 60 + seconds) * 1000);
 
-            position.setTime(new Date(millis));
+            position.setTime(dateBuilder.getDate());
 
-            // Location
             position.setValid(true);
             position.setLatitude(buf.readInt() / 1000000.0);
             position.setLongitude(buf.readInt() / 1000000.0);
@@ -92,24 +82,24 @@ public class MxtProtocolDecoder extends BaseProtocolDecoder {
             long flags = buf.readUnsignedInt();
             position.set(Event.KEY_IGNITION, BitUtil.check(flags, 0));
             position.set(Event.KEY_ALARM, BitUtil.check(flags, 1));
-            position.set(Event.KEY_INPUT, BitUtil.range(flags, 2, 5));
-            position.set(Event.KEY_OUTPUT, BitUtil.range(flags, 7, 3));
-            position.setCourse(BitUtil.range(flags, 10, 3) * 45);
+            position.set(Event.KEY_INPUT, BitUtil.between(flags, 2, 7));
+            position.set(Event.KEY_OUTPUT, BitUtil.between(flags, 7, 10));
+            position.setCourse(BitUtil.between(flags, 10, 13) * 45);
             //position.setValid(BitUtil.check(flags, 15));
             position.set(Event.KEY_CHARGE, BitUtil.check(flags, 20));
 
             position.setSpeed(UnitsConverter.knotsFromKph(buf.readUnsignedByte()));
 
-            int inputMask = buf.readUnsignedByte();
-            
+            buf.readUnsignedByte(); // input mask
+
             if (BitUtil.check(infoGroups, 0)) {
                 buf.skipBytes(8); // waypoints
             }
-            
+
             if (BitUtil.check(infoGroups, 1)) {
                 buf.skipBytes(8); // wireless accessory
             }
-            
+
             if (BitUtil.check(infoGroups, 2)) {
                 position.set(Event.KEY_SATELLITES, buf.readUnsignedByte());
                 position.set(Event.KEY_HDOP, buf.readUnsignedByte());
@@ -119,24 +109,24 @@ public class MxtProtocolDecoder extends BaseProtocolDecoder {
                 buf.readUnsignedByte(); // input voltage
                 position.set(Event.PREFIX_TEMP + 1, buf.readByte());
             }
-            
+
             if (BitUtil.check(infoGroups, 3)) {
                 position.set(Event.KEY_ODOMETER, buf.readUnsignedInt());
             }
-            
+
             if (BitUtil.check(infoGroups, 4)) {
-                buf.readUnsignedInt(); // hours
+                position.set(Event.KEY_HOURS, buf.readUnsignedInt());
             }
-            
+
             if (BitUtil.check(infoGroups, 5)) {
                 buf.readUnsignedInt(); // reason
             }
-            
+
             if (BitUtil.check(infoGroups, 6)) {
                 position.set(Event.KEY_POWER, buf.readUnsignedShort() * 0.001);
                 position.set(Event.KEY_BATTERY, buf.readUnsignedShort());
             }
-            
+
             if (BitUtil.check(infoGroups, 7)) {
                 position.set(Event.KEY_RFID, buf.readUnsignedInt());
             }

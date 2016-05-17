@@ -1,49 +1,35 @@
 package org.traccar.protocol;
 
-import org.jboss.netty.buffer.ChannelBuffers;
 import org.junit.Test;
-import org.traccar.helper.ChannelBufferTools;
-import static org.traccar.helper.DecoderVerifier.verify;
+import org.traccar.ProtocolTest;
 
-public class TytanProtocolDecoderTest extends ProtocolDecoderTest {
+public class TytanProtocolDecoderTest extends ProtocolTest {
 
     @Test
     public void testDecode() throws Exception {
 
         TytanProtocolDecoder decoder = new TytanProtocolDecoder(new TytanProtocol());
-        
-        verify(decoder.decode(null, null, ChannelBuffers.wrappedBuffer(ChannelBufferTools.convertHexString(
-                "d5300000689d65556877fbd437a09d8ea89360005a23124e410201213704000907000009ffffffffffffffff0affffffffffffffff18ff63ff7f7fff65ff66ff67ff68ff69ff6b00ff6cffffffff6dff7fffffffff81ffffffff82ffff83ffffffffffffffff88ffff9600"))));
-        
-        verify(decoder.decode(null, null, ChannelBuffers.wrappedBuffer(ChannelBufferTools.convertHexString(
-                "d7700000689d205544713bd3378f2c8e9fe181005affdf9041020000000602a1b7563b0700002055447159d3378f2d8e9fe281005affdf9041020000000602a1b7563b0700002055447177d3378f2e8e9fe181005a861a9141020000000602a1b7563b0700002055447195f3378f2d8e9fe281005a1ce78d41020000000602a1b7563b07000020554471b3d3378f2b8e9fe281005a58d88b41020000000602a1b7563b07000020554471d1f3378f2b8e9fe281005a58d88b41020000000602a1b7563b07000020554471efd3378f2a8e9fe381005a94ac8d41020000000602a1b7563b070000205544720df3378f2c8e9fe281005a1ce78d41020000000602a1b7563b070000205544722bd3378f2d8e9fe281005a48638b41020000000602a1b7563b0700002055447249f3378f308e9fe181005adf128c41020000000602a1b7563b070000"))));
 
-        verify(decoder.decode(null, null, ChannelBuffers.wrappedBuffer(ChannelBufferTools.convertHexString(
-                "D5F0FF00001032552F9121D5325FCB8D11AFA0000205396504004C0602FB5B434118001765006603676B68006B80426C02E2C8206D2F9600"))));
-        
-        verify(decoder.decode(null, null, ChannelBuffers.wrappedBuffer(ChannelBufferTools.convertHexString(
-                "D56000000AF20E4FA7C77AFF3282C68D2F890800"))));
+        verifyPositions(decoder, binary(
+                "B500192000001405125652CA9B1A325FC98D11A9990018020118FC0D"));
 
-        verify(decoder.decode(null, null, ChannelBuffers.wrappedBuffer(ChannelBufferTools.convertHexString(
-                "D56000000AF20e552e248007375bee8c02b3c002"))));
+        verifyPositions(decoder, binary(
+                "B500197800007422125652D7AC32325FD08D11A69900180200188280"));
 
-        verify(decoder.decode(null, null, ChannelBuffers.wrappedBuffer(ChannelBufferTools.convertHexString(
-                "D5C0FF00013D21552F9148D3325E8F8D11A80800060228816541061245FF674107C0001810130D21552F9148D3325E8F8D11A8080006022881654106121C46694107C0001810130D21552F9182D3325E8F8D11A8080006022881654106121C46694107C0001810140C"))));
+        verifyPositions(decoder, binary(
+                "B500181000001405115652DEEB2A325FC68D11A7D00005012A2AE1"));
+
+        verifyPositions(decoder, binary(
+                "B5005690000068494F561CEAE932325FD28D11A299000702000063045532030066013567018768014B6901286B0240396C04030785986D013E7F040000A7CE81040000A76C82027EAB83080FA01068FFFF0F3C880202583156"));
         
-        verify(decoder.decode(null, null, ChannelBuffers.wrappedBuffer(ChannelBufferTools.convertHexString(
-                "D56000000AF221552e31f4d3325e908d11a7c8000602d60e68410612cd74694107c00018100f0b"))));
-                
-        verify(decoder.decode(null, null, ChannelBuffers.wrappedBuffer(ChannelBufferTools.convertHexString(
-                "D56000000AF232552e0322d332603f8d1199a1100204bda204004c06024dea454118000e6515661b677068626b80486c02e2ae586d319600"))));
-                
-        verify(decoder.decode(null, null, ChannelBuffers.wrappedBuffer(ChannelBufferTools.convertHexString(
-                "D56000000AF20e552e259707375bee8c02b3c002"))));
-                        
-        verify(decoder.decode(null, null, ChannelBuffers.wrappedBuffer(ChannelBufferTools.convertHexString(
-                "D56000000AF20e552e259707375bee8c02b3c002"))));
-        
-        verify(decoder.decode(null, null, ChannelBuffers.wrappedBuffer(ChannelBufferTools.convertHexString(
-                "d7680000689d2055447267d3378f308e9fe181005ad1808f41020000000602a1b7563b0700002055447285f3378f308e9fe281005aee878c41020000000602a1b7563b07000020554472a3f3378f2e8e9fe381005ab3968e41020000000602a1b7563b07000020554472c1f3378f308e9fe281005ab3968e41020000000602a1b7563b07000020554472dff3378f2e8e9fe481005adf128c41020000000602a1b7563b07000020554472fdd3378f2e8e9fe481005a84548941020000000602a1b7563b070000205544731bd3378f2e8e9fe481005a49468f41020000000602a1b7563b0700002055447339f3378f2e8e9fe481005a3ad18e41020000000602a1b7563b0700002055447358f3378f308e9fe381005ab3968e41020000000602b909a13b0700002055447376f3378f308e9fe481005ac20b8f41020000000602b909a13b070000"))));
+        verifyPositions(decoder, binary(
+                "b50069a00000689d315604512b32378f1a8e9fe094005a04d7c84b41020300ab250402140c0702c0006501006601006b0280646c0402883db0315604525732378f1d8e9fdd94005a04d7c84b41020300ab250402140c0702c0006501006601006b0280646c0402883db08887"));
+
+        verifyPositions(decoder, binary(
+                "b50028080000689d215602772f00378f1b8e9fdd98005a042efb3e4102030000000402140c070200000901"));
+
+        verifyPositions(decoder, binary(
+                "b500280a0000689d215602772f00378f1b8e9fdd98005a042efb3e4102030000000402140c07020000da20"));
 
     }
 

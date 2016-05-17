@@ -19,18 +19,16 @@ import org.jboss.netty.buffer.ChannelBuffer;
 import org.jboss.netty.channel.Channel;
 import org.jboss.netty.channel.ChannelHandlerContext;
 import org.jboss.netty.handler.codec.frame.FrameDecoder;
-import org.traccar.helper.ChannelBufferTools;
+import org.traccar.helper.StringFinder;
 
 public class WondexFrameDecoder extends FrameDecoder {
-    
+
     private static final int KEEP_ALIVE_LENGTH = 8;
 
     @Override
     protected Object decode(
-            ChannelHandlerContext ctx,
-            Channel channel,
-            ChannelBuffer buf) throws Exception {
-        
+            ChannelHandlerContext ctx, Channel channel, ChannelBuffer buf) throws Exception {
+
         if (buf.readableBytes() < KEEP_ALIVE_LENGTH) {
             return null;
         }
@@ -45,13 +43,13 @@ public class WondexFrameDecoder extends FrameDecoder {
 
         } else {
 
-            Integer index = ChannelBufferTools.find(buf, buf.readerIndex(), buf.writerIndex(), "\r\n");
-            if (index != null) {
+            int index = buf.indexOf(buf.readerIndex(), buf.writerIndex(), new StringFinder("\r\n"));
+            if (index != -1) {
                 ChannelBuffer frame = buf.readBytes(index - buf.readerIndex());
                 buf.skipBytes(2);
                 return frame;
             }
-        
+
         }
 
         return null;

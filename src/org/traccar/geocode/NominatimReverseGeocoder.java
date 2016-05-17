@@ -15,30 +15,20 @@
  */
 package org.traccar.geocode;
 
-import java.io.InputStreamReader;
-import java.net.URL;
-import java.net.URLConnection;
-import javax.json.Json;
-import javax.json.JsonArray;
 import javax.json.JsonObject;
-import javax.xml.parsers.DocumentBuilder;
-import javax.xml.parsers.DocumentBuilderFactory;
-
-import org.traccar.helper.Log;
-import org.w3c.dom.Document;
 
 public class NominatimReverseGeocoder extends JsonReverseGeocoder {
 
     public NominatimReverseGeocoder() {
-        this("http://nominatim.openstreetmap.org/reverse");
+        this("http://nominatim.openstreetmap.org/reverse", 0);
     }
-    
-    public NominatimReverseGeocoder(String url) {
-        super(url + "?format=json&lat=%f&lon=%f&zoom=18&addressdetails=1");
+
+    public NominatimReverseGeocoder(String url, int cacheSize) {
+        super(url + "?format=json&lat=%f&lon=%f&zoom=18&addressdetails=1", cacheSize);
     }
 
     @Override
-    protected Address parseAddress(JsonObject json) {
+    public Address parseAddress(JsonObject json) {
         JsonObject result = json.getJsonObject("address");
 
         if (result != null) {
@@ -50,15 +40,24 @@ public class NominatimReverseGeocoder extends JsonReverseGeocoder {
             if (result.containsKey("road")) {
                 address.setStreet(result.getString("road"));
             }
+            if (result.containsKey("suburb")) {
+                address.setSuburb(result.getString("suburb"));
+            }
+
             if (result.containsKey("village")) {
                 address.setSettlement(result.getString("village"));
-            }
-            if (result.containsKey("city")) {
+            } else if (result.containsKey("town")) {
+                address.setSettlement(result.getString("town"));
+            } else if (result.containsKey("city")) {
                 address.setSettlement(result.getString("city"));
             }
+
             if (result.containsKey("state_district")) {
                 address.setDistrict(result.getString("state_district"));
+            } else if (result.containsKey("region")) {
+                address.setDistrict(result.getString("region"));
             }
+
             if (result.containsKey("state")) {
                 address.setState(result.getString("state"));
             }

@@ -14,33 +14,65 @@
  * limitations under the License.
  */
 
-Ext.Loader.setConfig({
-    disableCaching: false
-});
+var Locale = {};
 
-var availableLanguages = {
+Locale.languages = {
+    'ar': { name: 'العربية', code: 'en' },
+    'bg': { name: 'Български', code: 'bg' },
+    'cs': { name: 'Čeština', code: 'cs' },
     'de': { name: 'Deutsch', code: 'de' },
-    'dk': { name: 'Dansk', code: 'dk' },
+    'da': { name: 'Dansk', code: 'da' },
+    'el': { name: 'Ελληνικά', code: 'el' },
     'en': { name: 'English', code: 'en' },
     'es': { name: 'Español', code: 'es' },
+    'fa': { name: 'فارسی', code: 'fa' },
+    'fi': { name: 'Suomi', code: 'fi' },
     'fr': { name: 'Français', code: 'fr' },
+    'he': { name: 'עברית', code: 'he' },
+    'hu': { name: 'Magyar', code: 'hu' },
+    'id': { name: 'Bahasa Indonesia', code: 'id' },
+    'it': { name: 'Italiano', code: 'it' },
+    'ka': { name: 'ქართული', code: 'en' },
+    'lo': { name: 'ລາວ', code: 'en' },
+    'lt': { name: 'Lietuvių', code: 'lt' },
+    'ml': { name: 'മലയാളം', code: 'en' },
+    'ms': { name: 'بهاس ملايو', code: 'en' },
+    'nb': { name: 'Norsk bokmål', code: 'no_NB' },
+    'ne': { name: 'नेपाली', code: 'en' },
     'nl': { name: 'Nederlands', code: 'nl' },
+    'nn': { name: 'Norsk nynorsk', code: 'no_NN' },
     'pl': { name: 'Polski', code: 'pl' },
     'pt': { name: 'Português', code: 'pt' },
+    'pt_BR': { name: 'Português (Brasil)', code: 'pt_BR' },
+    'ro': { name: 'Română', code: 'ro' },
     'ru': { name: 'Русский', code: 'ru' },
+    'si': { name: 'සිංහල', code: 'en' },
+    'sk': { name: 'Slovenčina', code: 'sk' },
+    'sl': { name: 'Slovenščina', code: 'sl' },
+    'sr': { name: 'Srpski', code: 'sr' },
+    'ta': { name: 'தமிழ்', code: 'en' },
     'th': { name: 'ไทย', code: 'th' },
+    'tr': { name: 'Türkçe', code: 'tr' },
+    'uk': { name: 'Українська', code: 'ukr' },
+    'vi': { name: 'Tiếng Việt', code: 'en' },
     'zh': { name: '中文', code: 'zh_CN' }
 };
 
-var language = Ext.Object.fromQueryString(window.location.search.substring(1)).locale;
-if (language === undefined) {
-    language = window.navigator.userLanguage || window.navigator.language;
-    language = language.substr(0, 2);
+Locale.language = Ext.Object.fromQueryString(window.location.search.substring(1)).locale;
+if (Locale.language === undefined) {
+    Locale.language = window.navigator.userLanguage || window.navigator.language;
+    Locale.language = Locale.language.substr(0, 2);
 }
 
-if (!(language in availableLanguages)) {
-    language = 'en'; // default
+if (!(Locale.language in Locale.languages)) {
+    Locale.language = 'en'; // default
 }
 
-Ext.Loader.loadScript('/l10n/' + language + '.js');
-Ext.Loader.loadScript('//cdnjs.cloudflare.com/ajax/libs/extjs/6.0.0/classic/locale/locale-' + availableLanguages[language].code + '.js');
+Ext.Ajax.request({
+    url: '/l10n/' + Locale.language + '.json',
+    callback: function (options, success, response) {
+        Strings = Ext.decode(response.responseText);
+    }
+});
+
+Ext.Loader.loadScript('//cdnjs.cloudflare.com/ajax/libs/extjs/6.0.0/classic/locale/locale-' + Locale.languages[Locale.language].code + '.js');

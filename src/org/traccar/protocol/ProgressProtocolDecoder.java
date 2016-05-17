@@ -15,22 +15,20 @@
  */
 package org.traccar.protocol;
 
-import java.nio.ByteOrder;
-import java.nio.charset.Charset;
-import java.net.SocketAddress;
-import java.util.Calendar; 
-import java.util.LinkedList;
-import java.util.List;
-import java.util.TimeZone;
-
 import org.jboss.netty.buffer.ChannelBuffer;
 import org.jboss.netty.buffer.ChannelBuffers;
 import org.jboss.netty.channel.Channel;
-import org.jboss.netty.channel.ChannelHandlerContext;
-
 import org.traccar.BaseProtocolDecoder;
+import org.traccar.helper.BitUtil;
 import org.traccar.model.Event;
 import org.traccar.model.Position;
+
+import java.net.SocketAddress;
+import java.nio.ByteOrder;
+import java.nio.charset.StandardCharsets;
+import java.util.Date;
+import java.util.LinkedList;
+import java.util.List;
 
 public class ProgressProtocolDecoder extends BaseProtocolDecoder {
 
@@ -41,17 +39,15 @@ public class ProgressProtocolDecoder extends BaseProtocolDecoder {
         super(protocol);
     }
 
-    private static final int MSG_NULL = 0;
-    private static final int MSG_IDENT = 1;
-    private static final int MSG_IDENT_FULL = 2;
-    private static final int MSG_POINT = 10;
-    private static final int MSG_LOG_SYNC = 100;
-    private static final int MSG_LOGMSG = 101;
-    private static final int MSG_TEXT = 102;
-    private static final int MSG_ALARM = 200;
-    private static final int MSG_ALARM_RECIEVED = 201;
-
-    private static final String HEX_CHARS = "0123456789ABCDEF";
+    public static final int MSG_NULL = 0;
+    public static final int MSG_IDENT = 1;
+    public static final int MSG_IDENT_FULL = 2;
+    public static final int MSG_POINT = 10;
+    public static final int MSG_LOG_SYNC = 100;
+    public static final int MSG_LOGMSG = 101;
+    public static final int MSG_TEXT = 102;
+    public static final int MSG_ALARM = 200;
+    public static final int MSG_ALARM_RECIEVED = 201;
 
     private void requestArchive(Channel channel) {
         if (lastIndex == 0) {
@@ -67,26 +63,26 @@ public class ProgressProtocolDecoder extends BaseProtocolDecoder {
     }
 
     @Override
-    protected Object decode(Channel channel, SocketAddress remoteAddress, Object msg) throws Exception {
+    protected Object decode(
+            Channel channel, SocketAddress remoteAddress, Object msg) throws Exception {
 
         ChannelBuffer buf = (ChannelBuffer) msg;
         int type = buf.readUnsignedShort();
         buf.readUnsignedShort(); // length
 
-        // Authentication
         if (type == MSG_IDENT || type == MSG_IDENT_FULL) {
-            long id = buf.readUnsignedInt();
+
+            buf.readUnsignedInt(); // id
             int length = buf.readUnsignedShort();
             buf.skipBytes(length);
             length = buf.readUnsignedShort();
             buf.skipBytes(length);
             length = buf.readUnsignedShort();
-            String imei = buf.readBytes(length).toString(Charset.defaultCharset());
-            identify(imei, channel);
-        }
+            String imei = buf.readBytes(length).toString(StandardCharsets.US_ASCII);
+            identify(imei, channel, remoteAddress);
 
-        // Position
-        else if (hasDeviceId() && (type == MSG_POINT || type == MSG_ALARM || type == MSG_LOGMSG)) {
+        } else if (hasDeviceId() && (type == MSG_POINT || type == MSG_ALARM || type == MSG_LOGMSG)) {
+
             List<Position> positions = new LinkedList<>();
 
             int recordCount = 1;
@@ -99,7 +95,6 @@ public class ProgressProtocolDecoder extends BaseProtocolDecoder {
                 position.setProtocol(getProtocolName());
                 position.setDeviceId(getDeviceId());
 
-                // Message index
                 if (type == MSG_LOGMSG) {
                     position.set(Event.KEY_ARCHIVE, true);
                     int subtype = buf.readUnsignedShort();
@@ -116,84 +111,47 @@ public class ProgressProtocolDecoder extends BaseProtocolDecoder {
                     newIndex = buf.readUnsignedInt();
                 }
 
-                // Time
-                Calendar time = Calendar.getInstance(TimeZone.getTimeZone("UTC"));
-                time.clear();
-                time.setTimeInMillis(buf.readUnsignedInt() * 1000);
-                position.setTime(time.getTime());
-
-                // Latitude
+                position.setTime(new Date(buf.readUnsignedInt() * 1000));
                 position.setLatitude(buf.readInt() * 180.0 / 0x7FFFFFFF);
-
-                // Longitude
                 position.setLongitude(buf.readInt() * 180.0 / 0x7FFFFFFF);
+                position.setSpeed(buf.readUnsignedInt() * 0.01);
+                position.setCourse(buf.readUnsignedShort() * 0.01);
+                position.setAltitude(buf.readUnsignedShort() * 0.01);
 
-                // Speed
-                position.setSpeed(buf.readUnsignedInt() / 100);
+                int satellites = buf.readUnsignedByte();
+                position.setValid(satellites >= 3);
+                position.set(Event.KEY_SATELLITES, satellites);
 
-                // Course
-                position.setCourse(buf.readUnsignedShort() / 100);
-
-                // Altitude
-                position.setAltitude(buf.readUnsignedShort() / 100);
-
-                // Satellites
-                int satellitesNumber = buf.readUnsignedByte();
-                position.set(Event.KEY_SATELLITES, satellitesNumber);
-
-                // Validity
-                position.setValid(satellitesNumber >= 3); // TODO: probably wrong
-
-                // Cell signal
                 position.set(Event.KEY_GSM, buf.readUnsignedByte());
-
-                // Odometer
                 position.set(Event.KEY_ODOMETER, buf.readUnsignedInt());
 
                 long extraFlags = buf.readLong();
 
-                // Analog inputs
-                if ((extraFlags & 0x1) == 0x1) {
+                if (BitUtil.check(extraFlags, 0)) {
                     int count = buf.readUnsignedShort();
                     for (int i = 1; i <= count; i++) {
                         position.set(Event.PREFIX_ADC + i, buf.readUnsignedShort());
                     }
                 }
 
-                // CAN adapter
-                if ((extraFlags & 0x2) == 0x2) {
+                if (BitUtil.check(extraFlags, 1)) {
                     int size = buf.readUnsignedShort();
-                    position.set("can", buf.toString(buf.readerIndex(), size, Charset.defaultCharset()));
+                    position.set("can", buf.toString(buf.readerIndex(), size, StandardCharsets.US_ASCII));
                     buf.skipBytes(size);
                 }
 
-                // Passenger sensor
-                if ((extraFlags & 0x4) == 0x4) {
-                    int size = buf.readUnsignedShort();
-
-                    // Convert binary data to hex
-                    StringBuilder hex = new StringBuilder();
-                    for (int i = buf.readerIndex(); i < buf.readerIndex() + size; i++) {
-                        byte b = buf.getByte(i);
-                        hex.append(HEX_CHARS.charAt((b & 0xf0) >> 4));
-                        hex.append(HEX_CHARS.charAt((b & 0x0F)));
-                    }
-
-                    position.set("passenger", hex.toString());
-
-                    buf.skipBytes(size);
+                if (BitUtil.check(extraFlags, 2)) {
+                    position.set("passenger",
+                            ChannelBuffers.hexDump(buf.readBytes(buf.readUnsignedShort())));
                 }
 
-                // Send response for alarm message
                 if (type == MSG_ALARM) {
-                    byte[] response = {(byte)0xC9,0x00,0x00,0x00,0x00,0x00,0x00,0x00};
-                    channel.write(ChannelBuffers.wrappedBuffer(response));
-
                     position.set(Event.KEY_ALARM, true);
+                    byte[] response = {(byte) 0xC9, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+                    channel.write(ChannelBuffers.wrappedBuffer(response));
                 }
 
-                // Skip CRC
-                buf.readUnsignedInt();
+                buf.readUnsignedInt(); // crc
 
                 positions.add(position);
             }

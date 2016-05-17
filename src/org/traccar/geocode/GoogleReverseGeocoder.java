@@ -22,11 +22,19 @@ import javax.json.JsonString;
 public class GoogleReverseGeocoder extends JsonReverseGeocoder {
 
     public GoogleReverseGeocoder() {
-        super("http://maps.googleapis.com/maps/api/geocode/json?latlng=%f,%f");
+        this(0);
+    }
+
+    public GoogleReverseGeocoder(int cacheSize) {
+        super("http://maps.googleapis.com/maps/api/geocode/json?latlng=%f,%f", cacheSize);
+    }
+
+    public GoogleReverseGeocoder(String key, int cacheSize) {
+        super("https://maps.googleapis.com/maps/api/geocode/json?latlng=%f,%f&key=" + key, cacheSize);
     }
 
     @Override
-    protected Address parseAddress(JsonObject json) {
+    public Address parseAddress(JsonObject json) {
         JsonArray results = json.getJsonArray("results");
 
         if (!results.isEmpty()) {
@@ -39,35 +47,33 @@ public class GoogleReverseGeocoder extends JsonReverseGeocoder {
 
                 String value = component.getString("short_name");
 
-                for (JsonString type : component.getJsonArray("types").getValuesAs(JsonString.class)) {
-                    
+                typesLoop: for (JsonString type : component.getJsonArray("types").getValuesAs(JsonString.class)) {
+
                     switch (type.getString()) {
                         case "street_number":
                             address.setHouse(value);
-                            break;
+                            break typesLoop;
                         case "route":
                             address.setStreet(value);
-                            break;
+                            break typesLoop;
                         case "locality":
                             address.setSettlement(value);
-                            break;
+                            break typesLoop;
                         case "administrative_area_level_2":
                             address.setDistrict(value);
-                            break;
+                            break typesLoop;
                         case "administrative_area_level_1":
                             address.setState(value);
-                            break;
+                            break typesLoop;
                         case "country":
                             address.setCountry(value);
-                            break;
+                            break typesLoop;
                         case "postal_code":
                             address.setPostcode(value);
-                            break;
+                            break typesLoop;
                         default:
-                            continue;
+                            break;
                     }
-                    
-                    break;
                 }
             }
 

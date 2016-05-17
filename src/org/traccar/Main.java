@@ -1,5 +1,5 @@
 /*
- * Copyright 2012 - 2013 Anton Tananaev (anton.tananaev@gmail.com)
+ * Copyright 2012 - 2015 Anton Tananaev (anton.tananaev@gmail.com)
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,11 +15,15 @@
  */
 package org.traccar;
 
-import java.util.Locale;
 import org.traccar.helper.Log;
 
-public class Main {
-    
+import java.util.Locale;
+
+public final class Main {
+
+    private Main() {
+    }
+
     public static void main(String[] args) throws Exception {
         Locale.setDefault(Locale.ENGLISH);
 
@@ -31,11 +35,11 @@ public class Main {
             Context.getWebServer().start();
         }
 
-        // Shutdown server properly
         Runtime.getRuntime().addShutdownHook(new Thread() {
             @Override
             public void run() {
                 Log.info("Shutting down server...");
+
                 if (Context.getWebServer() != null) {
                     Context.getWebServer().stop();
                 }

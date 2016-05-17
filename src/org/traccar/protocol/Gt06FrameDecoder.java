@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Anton Tananaev (anton.tananaev@gmail.com)
+ * Copyright 2014 - 2016 Anton Tananaev (anton.tananaev@gmail.com)
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,23 +24,27 @@ public class Gt06FrameDecoder extends FrameDecoder {
 
     @Override
     protected Object decode(
-            ChannelHandlerContext ctx,
-            Channel channel,
-            ChannelBuffer buf) throws Exception {
-        
+            ChannelHandlerContext ctx, Channel channel, ChannelBuffer buf) throws Exception {
+
         // Check minimum length
         if (buf.readableBytes() < 5) {
             return null;
         }
-        
+
         int length = 2 + 2; // head and tail
-        
+
         if (buf.getByte(buf.readerIndex()) == 0x78) {
             length += 1 + buf.getUnsignedByte(buf.readerIndex() + 2);
+
+            int type = buf.getUnsignedByte(buf.readerIndex() + 3);
+            if (type == Gt06ProtocolDecoder.MSG_STATUS && length == 13) {
+                length += 2; // workaround for #1727
+            }
+
         } else {
             length += 2 + buf.getUnsignedShort(buf.readerIndex() + 2);
         }
-        
+
         // Check length and return buffer
         if (buf.readableBytes() >= length) {
             return buf.readBytes(length);

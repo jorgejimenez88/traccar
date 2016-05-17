@@ -15,56 +15,60 @@
  */
 package org.traccar.model;
 
+import org.traccar.helper.Log;
 import org.traccar.web.JsonConverter;
 
-import java.text.DecimalFormat;
-import java.util.LinkedHashMap;
-import java.util.Map;
 import javax.json.Json;
 import javax.json.JsonNumber;
 import javax.json.JsonObject;
 import javax.json.JsonObjectBuilder;
 import javax.json.JsonString;
 import javax.json.JsonValue;
+import java.text.DecimalFormat;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /**
  * Format extended tracker status
  */
-public class MiscFormatter {
+public final class MiscFormatter {
 
-    private static final String xmlRootNode = "info";
+    private MiscFormatter() {
+    }
 
-    private static final DecimalFormat decimalFormat = new DecimalFormat("#.##");
+    private static final String XML_ROOT_NODE = "info";
+
+    private static final DecimalFormat DECIMAL_FORMAT = new DecimalFormat("#.##");
 
     private static String format(Object value) {
         if (value instanceof Double || value instanceof Float) {
-            return decimalFormat.format(value);
+            return DECIMAL_FORMAT.format(value);
         } else {
             return value.toString();
         }
     }
 
-    public static String toXmlString(Map<String, Object> other) {
+    public static String toXmlString(Map<String, Object> attributes) {
         StringBuilder result = new StringBuilder();
-        
-        result.append("<").append(xmlRootNode).append(">");
-        
-        for (Map.Entry<String, Object> entry : other.entrySet()) {
-         
+
+        result.append("<").append(XML_ROOT_NODE).append(">");
+
+        for (Map.Entry<String, Object> entry : attributes.entrySet()) {
+
             result.append("<").append(entry.getKey()).append(">");
             result.append(format(entry.getValue()));
             result.append("</").append(entry.getKey()).append(">");
         }
 
-        result.append("</").append(xmlRootNode).append(">");
-        
+        result.append("</").append(XML_ROOT_NODE).append(">");
+
         return result.toString();
     }
 
-    public static JsonObject toJson(Map<String, Object> other) {
+    public static JsonObject toJson(Map<String, Object> attributes) {
         JsonObjectBuilder json = Json.createObjectBuilder();
 
-        for (Map.Entry<String, Object> entry : other.entrySet()) {
+        for (Map.Entry<String, Object> entry : attributes.entrySet()) {
             if (entry.getValue() instanceof String) {
                 json.add(entry.getKey(), (String) entry.getValue());
             } else if (entry.getValue() instanceof Integer) {
@@ -84,38 +88,42 @@ public class MiscFormatter {
 
         return json.build();
     }
-    
+
     public static Map<String, Object> fromJson(JsonObject json) {
-        
-        Map<String, Object> other = new LinkedHashMap<>();
-        
+
+        Map<String, Object> attributes = new LinkedHashMap<>();
+
         for (Map.Entry<String, JsonValue> entry : json.entrySet()) {
-            switch (entry.getValue().getValueType()) {
+            JsonValue.ValueType type = entry.getValue().getValueType();
+            switch (type) {
                 case STRING:
-                    other.put(entry.getKey(), ((JsonString) entry.getValue()).getString());
+                    attributes.put(entry.getKey(), ((JsonString) entry.getValue()).getString());
                     break;
                 case NUMBER:
                     JsonNumber number = (JsonNumber) entry.getValue();
                     if (number.isIntegral()) {
-                        other.put(entry.getKey(), number.longValue());
+                        attributes.put(entry.getKey(), number.longValue());
                     } else {
-                        other.put(entry.getKey(), number.doubleValue());
+                        attributes.put(entry.getKey(), number.doubleValue());
                     }
                     break;
                 case TRUE:
-                    other.put(entry.getKey(), true);
+                    attributes.put(entry.getKey(), true);
                     break;
                 case FALSE:
-                    other.put(entry.getKey(), false);
+                    attributes.put(entry.getKey(), false);
+                    break;
+                default:
+                    Log.warning(new IllegalArgumentException(type.name()));
                     break;
             }
         }
-        
-        return other;
+
+        return attributes;
     }
-    
-    public static String toJsonString(Map<String, Object> other) {
-        return toJson(other).toString();
+
+    public static String toJsonString(Map<String, Object> attributes) {
+        return toJson(attributes).toString();
     }
 
 }

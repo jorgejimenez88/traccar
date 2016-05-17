@@ -20,6 +20,7 @@ import org.jboss.netty.channel.ChannelPipeline;
 import org.jboss.netty.handler.codec.frame.LengthFieldBasedFrameDecoder;
 import org.traccar.BaseProtocol;
 import org.traccar.TrackerServer;
+import org.traccar.model.Command;
 
 import java.util.List;
 
@@ -27,6 +28,11 @@ public class CityeasyProtocol extends BaseProtocol {
 
     public CityeasyProtocol() {
         super("cityeasy");
+        setSupportedCommands(
+                Command.TYPE_POSITION_SINGLE,
+                Command.TYPE_POSITION_PERIODIC,
+                Command.TYPE_POSITION_STOP,
+                Command.TYPE_SET_TIMEZONE);
     }
 
     @Override
@@ -35,6 +41,7 @@ public class CityeasyProtocol extends BaseProtocol {
             @Override
             protected void addSpecificHandlers(ChannelPipeline pipeline) {
                 pipeline.addLast("frameDecoder", new LengthFieldBasedFrameDecoder(1024, 2, 2, -4, 0));
+                pipeline.addLast("objectEncoder", new CityeasyProtocolEncoder());
                 pipeline.addLast("objectDecoder", new CityeasyProtocolDecoder(CityeasyProtocol.this));
             }
         });

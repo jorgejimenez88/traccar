@@ -1,5 +1,5 @@
 /*
- * Copyright 2012 Anton Tananaev (anton.tananaev@gmail.com)
+ * Copyright 2012 - 2015 Anton Tananaev (anton.tananaev@gmail.com)
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,19 +15,17 @@
  */
 package org.traccar.protocol;
 
-import java.net.SocketAddress;
-import java.util.Calendar; 
-import java.util.TimeZone;
-
 import org.jboss.netty.buffer.ChannelBuffer;
 import org.jboss.netty.buffer.ChannelBuffers;
 import org.jboss.netty.channel.Channel;
-import org.jboss.netty.channel.ChannelHandlerContext;
-
 import org.traccar.BaseProtocolDecoder;
+import org.traccar.helper.BitUtil;
+import org.traccar.helper.DateBuilder;
 import org.traccar.helper.UnitsConverter;
 import org.traccar.model.Event;
 import org.traccar.model.Position;
+
+import java.net.SocketAddress;
 
 public class Gt02ProtocolDecoder extends BaseProtocolDecoder {
 
@@ -35,96 +33,81 @@ public class Gt02ProtocolDecoder extends BaseProtocolDecoder {
         super(protocol);
     }
 
-    private String readImei(ChannelBuffer buf) {
-        int b = buf.readUnsignedByte();
-        StringBuilder imei = new StringBuilder();
-        imei.append(b & 0x0F);
-        for (int i = 0; i < 7; i++) {
-            b = buf.readUnsignedByte();
-            imei.append((b & 0xF0) >> 4);
-            imei.append(b & 0x0F);
-        }
-        return imei.toString();
-    }
-
-    private static final int MSG_HEARTBEAT = 0x1A;
-    private static final int MSG_DATA = 0x10;
+    public static final int MSG_HEARTBEAT = 0x1A;
+    public static final int MSG_DATA = 0x10;
 
     @Override
     protected Object decode(
-            Channel channel, SocketAddress remoteAddress, Object msg)
-            throws Exception {
+            Channel channel, SocketAddress remoteAddress, Object msg) throws Exception {
 
         ChannelBuffer buf = (ChannelBuffer) msg;
 
         buf.skipBytes(2); // header
         buf.readByte(); // size
 
-        // Zero for location messages
-        buf.readByte(); // voltage
-        buf.readByte(); // gsm signal
+        Position position = new Position();
+        position.setProtocol(getProtocolName());
 
-        String imei = readImei(buf);
-        long index = buf.readUnsignedShort();
+        // Zero for location messages
+        int power = buf.readUnsignedByte();
+        int gsm = buf.readUnsignedByte();
+
+        String imei = ChannelBuffers.hexDump(buf.readBytes(8)).substring(1);
+        if (!identify(imei, channel, remoteAddress)) {
+            return null;
+        }
+        position.setDeviceId(getDeviceId());
+
+        position.set(Event.KEY_INDEX, buf.readUnsignedShort());
+
         int type = buf.readUnsignedByte();
 
         if (type == MSG_HEARTBEAT) {
+
+            getLastLocation(position, null);
+
+            position.set(Event.KEY_POWER, power);
+            position.set(Event.KEY_GSM, gsm);
+
             if (channel != null) {
                 byte[] response = {0x54, 0x68, 0x1A, 0x0D, 0x0A};
                 channel.write(ChannelBuffers.wrappedBuffer(response));
             }
-        }
 
-        else if (type == MSG_DATA) {
+        } else if (type == MSG_DATA) {
 
-            // Create new position
-            Position position = new Position();
-            position.setProtocol(getProtocolName());
-            position.set(Event.KEY_INDEX, index);
+            DateBuilder dateBuilder = new DateBuilder()
+                    .setDate(buf.readUnsignedByte(), buf.readUnsignedByte(), buf.readUnsignedByte())
+                    .setTime(buf.readUnsignedByte(), buf.readUnsignedByte(), buf.readUnsignedByte());
+            position.setTime(dateBuilder.getDate());
 
-            // Get device id
-            if (!identify(imei, channel)) {
-                return null;
-            }
-            position.setDeviceId(getDeviceId());
-
-            // Date and time
-            Calendar time = Calendar.getInstance(TimeZone.getTimeZone("UTC"));
-            time.clear();
-            time.set(Calendar.YEAR, 2000 + buf.readUnsignedByte());
-            time.set(Calendar.MONTH, buf.readUnsignedByte() - 1);
-            time.set(Calendar.DAY_OF_MONTH, buf.readUnsignedByte());
-            time.set(Calendar.HOUR_OF_DAY, buf.readUnsignedByte());
-            time.set(Calendar.MINUTE, buf.readUnsignedByte());
-            time.set(Calendar.SECOND, buf.readUnsignedByte());
-            position.setTime(time.getTime());
-
-            // Latitude
             double latitude = buf.readUnsignedInt() / (60.0 * 30000.0);
-
-            // Longitude
             double longitude = buf.readUnsignedInt() / (60.0 * 30000.0);
 
-            // Speed
             position.setSpeed(UnitsConverter.knotsFromKph(buf.readUnsignedByte()));
-
-            // Course
             position.setCourse(buf.readUnsignedShort());
 
             buf.skipBytes(3); // reserved
 
-            // Flags
             long flags = buf.readUnsignedInt();
-            position.setValid((flags & 0x1) == 0x1);
-            if ((flags & 0x2) == 0) latitude = -latitude;
-            if ((flags & 0x4) == 0) longitude = -longitude;
+            position.setValid(BitUtil.check(flags, 0));
+            if (!BitUtil.check(flags, 1)) {
+                latitude = -latitude;
+            }
+            if (!BitUtil.check(flags, 2)) {
+                longitude = -longitude;
+            }
 
             position.setLatitude(latitude);
             position.setLongitude(longitude);
-            return position;
+
+        } else {
+
+            return null;
+
         }
 
-        return null;
+        return position;
     }
 
 }

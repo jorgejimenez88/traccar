@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 Anton Tananaev (anton.tananaev@gmail.com)
+ * Copyright 2013 - 2016 Anton Tananaev (anton.tananaev@gmail.com)
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,13 +15,6 @@
  */
 package org.traccar.protocol;
 
-import java.net.SocketAddress;
-import java.nio.charset.Charset;
-import java.text.DateFormat;
-import java.text.SimpleDateFormat;
-import java.util.Date;
-import java.util.List;
-import java.util.Map;
 import org.jboss.netty.channel.Channel;
 import org.jboss.netty.channel.ChannelFutureListener;
 import org.jboss.netty.handler.codec.http.DefaultHttpResponse;
@@ -30,92 +23,104 @@ import org.jboss.netty.handler.codec.http.HttpResponse;
 import org.jboss.netty.handler.codec.http.HttpResponseStatus;
 import org.jboss.netty.handler.codec.http.HttpVersion;
 import org.jboss.netty.handler.codec.http.QueryStringDecoder;
+import org.joda.time.format.ISODateTimeFormat;
 import org.traccar.BaseProtocolDecoder;
 import org.traccar.model.Event;
 import org.traccar.model.Position;
 
+import java.net.SocketAddress;
+import java.nio.charset.StandardCharsets;
+import java.text.DateFormat;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.List;
+import java.util.Map;
+
 public class OsmAndProtocolDecoder extends BaseProtocolDecoder {
-    
+
     public OsmAndProtocolDecoder(OsmAndProtocol protocol) {
         super(protocol);
     }
-    
+
     @Override
     protected Object decode(
-            Channel channel, SocketAddress remoteAddress, Object msg)
-            throws Exception {
-        
+            Channel channel, SocketAddress remoteAddress, Object msg) throws Exception {
+
         HttpRequest request = (HttpRequest) msg;
         QueryStringDecoder decoder = new QueryStringDecoder(request.getUri());
         Map<String, List<String>> params = decoder.getParameters();
         if (params.isEmpty()) {
             decoder = new QueryStringDecoder(
-                    request.getContent().toString(Charset.defaultCharset()), false);
+                    request.getContent().toString(StandardCharsets.US_ASCII), false);
             params = decoder.getParameters();
         }
 
-        // Create new position
         Position position = new Position();
         position.setProtocol(getProtocolName());
-
-        // Identification
-        String id = params.get(params.containsKey("id") ? "id" : "deviceid").get(0);
-        if (!identify(id, channel)) {
-            return null;
-        }
-        position.setDeviceId(getDeviceId());
-
-        // Decode position
         position.setValid(true);
-        if (params.containsKey("timestamp")) {
-            try {
-                position.setTime(new Date(Long.valueOf(params.get("timestamp").get(0)) * 1000));
-            } catch (NumberFormatException error) {
-                DateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
-                position.setTime(dateFormat.parse(params.get("timestamp").get(0)));
+
+        for (Map.Entry<String, List<String>> entry : params.entrySet()) {
+            String value = entry.getValue().get(0);
+            switch (entry.getKey()) {
+                case "id":
+                case "deviceid":
+                    if (!identify(value, channel, remoteAddress)) {
+                        return null;
+                    }
+                    position.setDeviceId(getDeviceId());
+                    break;
+                case "valid":
+                    position.setValid(Boolean.parseBoolean(value));
+                    break;
+                case "timestamp":
+                    try {
+                        long timestamp = Long.parseLong(value);
+                        if (timestamp < Integer.MAX_VALUE) {
+                            timestamp *= 1000;
+                        }
+                        position.setTime(new Date(timestamp));
+                    } catch (NumberFormatException error) {
+                        if (value.contains("T")) {
+                            position.setTime(new Date(
+                                    ISODateTimeFormat.dateTimeParser().parseMillis(value)));
+                        } else {
+                            DateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+                            position.setTime(dateFormat.parse(value));
+                        }
+                    }
+                    break;
+                case "lat":
+                    position.setLatitude(Double.parseDouble(value));
+                    break;
+                case "lon":
+                    position.setLongitude(Double.parseDouble(value));
+                    break;
+                case "speed":
+                    position.setSpeed(Double.parseDouble(value));
+                    break;
+                case "bearing":
+                case "heading":
+                    position.setCourse(Double.parseDouble(value));
+                    break;
+                case "altitude":
+                    position.setAltitude(Double.parseDouble(value));
+                    break;
+                case "hdop":
+                    position.set(Event.KEY_HDOP, Double.parseDouble(value));
+                    break;
+                case "batt":
+                    position.set(Event.KEY_BATTERY, value);
+                    break;
+                default:
+                    position.set(entry.getKey(), value);
+                    break;
             }
-        } else {
+        }
+
+        if (position.getFixTime() == null) {
             position.setTime(new Date());
         }
-        position.setLatitude(Double.valueOf(params.get("lat").get(0)));
-        position.setLongitude(Double.valueOf(params.get("lon").get(0)));
 
-        // Optional parameters
-        if (params.containsKey("speed")) {
-            position.setSpeed(Double.valueOf(params.get("speed").get(0)));
-        }
-
-        if (params.containsKey("bearing")) {
-            position.setCourse(Double.valueOf(params.get("bearing").get(0)));
-        } else if (params.containsKey("heading")) {
-            position.setCourse(Double.valueOf(params.get("heading").get(0)));
-        }
-
-        if (params.containsKey("altitude")) {
-            position.setAltitude(Double.valueOf(params.get("altitude").get(0)));
-        }
-
-        if (params.containsKey("hdop")) {
-            position.set(Event.KEY_HDOP, params.get("hdop").get(0));
-        }
-
-        if (params.containsKey("vacc")) {
-            position.set("vacc", params.get("vacc").get(0));
-        }
-
-        if (params.containsKey("hacc")) {
-            position.set("hacc", params.get("hacc").get(0));
-        }
-
-        if (params.containsKey("batt")) {
-            position.set(Event.KEY_BATTERY, params.get("batt").get(0));
-        }
-
-        if (params.containsKey("desc")) {
-            position.set("description", params.get("desc").get(0));
-        }
-
-        // Send response
         if (channel != null) {
             HttpResponse response = new DefaultHttpResponse(
                     HttpVersion.HTTP_1_1, HttpResponseStatus.OK);

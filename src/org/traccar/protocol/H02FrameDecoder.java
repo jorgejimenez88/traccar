@@ -15,47 +15,41 @@
  */
 package org.traccar.protocol;
 
-import java.nio.charset.Charset;
 import org.jboss.netty.buffer.ChannelBuffer;
 import org.jboss.netty.channel.Channel;
 import org.jboss.netty.channel.ChannelHandlerContext;
 import org.jboss.netty.handler.codec.frame.FrameDecoder;
-import org.traccar.helper.ChannelBufferTools;
 
 public class H02FrameDecoder extends FrameDecoder {
-    
+
     private static final int MESSAGE_LENGTH = 32;
 
     @Override
     protected Object decode(
-            ChannelHandlerContext ctx,
-            Channel channel,
-            ChannelBuffer buf) throws Exception {
-        
-        String marker = buf.toString(buf.readerIndex(), 1, Charset.defaultCharset());
+            ChannelHandlerContext ctx, Channel channel, ChannelBuffer buf) throws Exception {
 
-        while (!marker.equals("*") && !marker.equals("$") && buf.readableBytes() > 0) {
+        char marker = (char) buf.getByte(buf.readerIndex());
+
+        while (marker != '*' && marker != '$' && buf.readableBytes() > 0) {
             buf.skipBytes(1);
             if (buf.readableBytes() > 0) {
-                marker = buf.toString(buf.readerIndex(), 1, Charset.defaultCharset());
+                marker = (char) buf.getByte(buf.readerIndex());
             }
         }
-        
-        if (marker.equals("*")) {
+
+        if (marker == '*') {
 
             // Return text message
-            Integer index = ChannelBufferTools.find(buf, buf.readerIndex(), buf.readableBytes(), "#");
-            if (index != null) {
+            int index = buf.indexOf(buf.readerIndex(), buf.writerIndex(), (byte) '#');
+            if (index != -1) {
                 return buf.readBytes(index + 1 - buf.readerIndex());
             }
-            
-        } else if (marker.equals("$")) {
+
+        } else if (marker == '$' && buf.readableBytes() >= MESSAGE_LENGTH) {
 
             // Return binary message
-            if (buf.readableBytes() >= MESSAGE_LENGTH) {
-                return buf.readBytes(MESSAGE_LENGTH);
-            }
-            
+            return buf.readBytes(MESSAGE_LENGTH);
+
         }
 
         return null;

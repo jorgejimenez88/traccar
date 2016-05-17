@@ -15,16 +15,16 @@
  */
 package org.traccar.protocol;
 
-import java.net.SocketAddress;
-import java.util.Calendar; 
-import java.util.TimeZone;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import org.jboss.netty.channel.Channel;
-import org.jboss.netty.channel.ChannelHandlerContext;
 import org.traccar.BaseProtocolDecoder;
+import org.traccar.helper.DateBuilder;
+import org.traccar.helper.Parser;
+import org.traccar.helper.PatternBuilder;
 import org.traccar.model.Event;
 import org.traccar.model.Position;
+
+import java.net.SocketAddress;
+import java.util.regex.Pattern;
 
 public class Stl060ProtocolDecoder extends BaseProtocolDecoder {
 
@@ -32,125 +32,90 @@ public class Stl060ProtocolDecoder extends BaseProtocolDecoder {
         super(protocol);
     }
 
-    //$1,357804047969310,D001,AP29AW0963,01/01/13,13:24:47,1723.9582N,07834.0945E
-    //,00100,010,0,0,0,0,
-    //0,0008478660,1450,40,34,0,0,0,A
-    private static final Pattern pattern = Pattern.compile(
-            ".*\\$1," +
-            "(\\d+)," +                         // IMEI
-            "D001," +                           // Type
-            "[^,]*," +                          // Vehicle
-            "(\\d{2})/(\\d{2})/(\\d{2})," +     // Date
-            "(\\d{2}):(\\d{2}):(\\d{2})," +     // Time
-            "(\\d{2})(\\d{2})\\.?(\\d+)([NS])," + // Latitude
-            "(\\d{3})(\\d{2})\\.?(\\d+)([EW])," + // Longitude
-            "(\\d+\\.?\\d*)," +                 // Speed
-            "(\\d+\\.?\\d*)," +                 // Course
-
-            "(?:(\\d+)," +                      // Odometer
-            "(\\d+)," +                         // Ignition
-            "(\\d+)," +                         // DI1
-            "(\\d+)," +                         // DI2
-            "(\\d+),|" +                        // Fuel
-
-            "([01])," +                         // Charging
-            "([01])," +                         // Ignition
-            "0,0," +                            // Reserved
-            "(\\d+)," +                         // DI
-            "([^,]+)," +                        // RFID
-            "(\\d+)," +                         // Odometer
-            "(\\d+)," +                         // Temperature
-            "(\\d+)," +                         // Fuel
-            "([01])," +                         // Accelerometer
-            "([01])," +                         // DO1
-            "([01]),)" +                        // DO2
-
-            "([AV])" +                          // Validity
-            ".*");
+    private static final Pattern PATTERN = new PatternBuilder()
+            .any()
+            .text("$1,")
+            .number("(d+),")                     // imei
+            .text("D001,")                       // type
+            .expression("[^,]*,")                // vehicle
+            .number("(dd)/(dd)/(dd),")           // date
+            .number("(dd):(dd):(dd),")           // time
+            .number("(dd)(dd).?(d+)([NS]),")     // latitude
+            .number("(ddd)(dd).?(d+)([EW]),")    // longitude
+            .number("(d+.?d*),")                 // speed
+            .number("(d+.?d*),")                 // course
+            .groupBegin()
+            .number("(d+),")                     // odometer
+            .number("(d+),")                     // Ignition
+            .number("(d+),")                     // di1
+            .number("(d+),")                     // di2
+            .number("(d+),")                     // fuel
+            .or()
+            .expression("([01]),")               // charging
+            .expression("([01]),")               // ignition
+            .expression("0,0,")                  // reserved
+            .number("(d+),")                     // di
+            .expression("([^,]+),")              // rfid
+            .number("(d+),")                     // odometer
+            .number("(d+),")                     // temperature
+            .number("(d+),")                     // fuel
+            .expression("([01]),")               // accelerometer
+            .expression("([01]),")               // do1
+            .expression("([01]),")               // do2
+            .groupEnd()
+            .expression("([AV])")                // validity
+            .any()
+            .compile();
 
     @Override
     protected Object decode(
-            Channel channel, SocketAddress remoteAddress, Object msg)
-            throws Exception {
+            Channel channel, SocketAddress remoteAddress, Object msg) throws Exception {
 
-        String sentence = (String) msg;
-
-        // Parse message
-        Matcher parser = pattern.matcher(sentence);
+        Parser parser = new Parser(PATTERN, (String) msg);
         if (!parser.matches()) {
             return null;
         }
 
-        // Create new position
         Position position = new Position();
         position.setProtocol(getProtocolName());
 
-        Integer index = 1;
-
-        // Device identification
-        if (!identify(parser.group(index++), channel)) {
+        if (!identify(parser.next(), channel, remoteAddress)) {
             return null;
         }
         position.setDeviceId(getDeviceId());
-        
-        // Date
-        Calendar time = Calendar.getInstance(TimeZone.getTimeZone("UTC"));
-        time.clear();
-        time.set(Calendar.DAY_OF_MONTH, Integer.valueOf(parser.group(index++)));
-        time.set(Calendar.MONTH, Integer.valueOf(parser.group(index++)) - 1);
-        time.set(Calendar.YEAR, 2000 + Integer.valueOf(parser.group(index++)));
 
-        // Time
-        time.set(Calendar.HOUR_OF_DAY, Integer.valueOf(parser.group(index++)));
-        time.set(Calendar.MINUTE, Integer.valueOf(parser.group(index++)));
-        time.set(Calendar.SECOND, Integer.valueOf(parser.group(index++)));
-        position.setTime(time.getTime());
+        DateBuilder dateBuilder = new DateBuilder()
+                .setDateReverse(parser.nextInt(), parser.nextInt(), parser.nextInt())
+                .setTime(parser.nextInt(), parser.nextInt(), parser.nextInt());
+        position.setTime(dateBuilder.getDate());
 
-        // Latitude
-        Double latitude = Double.valueOf(parser.group(index++));
-        latitude += Double.valueOf(parser.group(index++) + parser.group(index++)) / 600000;
-        if (parser.group(index++).compareTo("S") == 0) latitude = -latitude;
-        position.setLatitude(latitude);
-
-        // Longitude
-        Double longitude = Double.valueOf(parser.group(index++));
-        longitude += Double.valueOf(parser.group(index++) + parser.group(index++)) / 600000;
-        if (parser.group(index++).compareTo("W") == 0) longitude = -longitude;
-        position.setLongitude(longitude);
-
-        // Speed
-        position.setSpeed(Double.valueOf(parser.group(index++)));
-
-        // Course
-        position.setCourse(Double.valueOf(parser.group(index++)));
+        position.setLatitude(parser.nextCoordinate(Parser.CoordinateFormat.DEG_MIN_MIN_HEM));
+        position.setLongitude(parser.nextCoordinate(Parser.CoordinateFormat.DEG_MIN_MIN_HEM));
+        position.setSpeed(parser.nextDouble());
+        position.setCourse(parser.nextDouble());
 
         // Old format
-        if (parser.group(index) != null) {
-            position.set(Event.KEY_ODOMETER, Integer.valueOf(parser.group(index++)));
-            position.set(Event.KEY_IGNITION, Integer.valueOf(parser.group(index++)));
-            position.set(Event.KEY_INPUT, Integer.valueOf(parser.group(index++)) + Integer.valueOf(parser.group(index++)) << 1);
-            position.set(Event.KEY_FUEL, Integer.valueOf(parser.group(index++)));
-        } else {
-            index += 5;
+        if (parser.hasNext(5)) {
+            position.set(Event.KEY_ODOMETER, parser.nextInt());
+            position.set(Event.KEY_IGNITION, parser.nextInt());
+            position.set(Event.KEY_INPUT, parser.nextInt() + parser.nextInt() << 1);
+            position.set(Event.KEY_FUEL, parser.nextInt());
         }
 
         // New format
-        if (parser.group(index) != null) {
-            position.set(Event.KEY_CHARGE, Integer.valueOf(parser.group(index++)) == 1);
-            position.set(Event.KEY_IGNITION, Integer.valueOf(parser.group(index++)));
-            position.set(Event.KEY_INPUT, Integer.valueOf(parser.group(index++)));
-            position.set(Event.KEY_RFID, parser.group(index++));
-            position.set(Event.KEY_ODOMETER, Integer.valueOf(parser.group(index++)));
-            position.set(Event.PREFIX_TEMP + 1, Integer.valueOf(parser.group(index++)));
-            position.set(Event.KEY_FUEL, Integer.valueOf(parser.group(index++)));
-            position.set("accel", Integer.valueOf(parser.group(index++)) == 1);
-            position.set(Event.KEY_OUTPUT, Integer.valueOf(parser.group(index++)) + Integer.valueOf(parser.group(index++)) << 1);
-        } else {
-            index += 10;
+        if (parser.hasNext(10)) {
+            position.set(Event.KEY_CHARGE, parser.nextInt() == 1);
+            position.set(Event.KEY_IGNITION, parser.nextInt());
+            position.set(Event.KEY_INPUT, parser.nextInt());
+            position.set(Event.KEY_RFID, parser.next());
+            position.set(Event.KEY_ODOMETER, parser.nextInt());
+            position.set(Event.PREFIX_TEMP + 1, parser.nextInt());
+            position.set(Event.KEY_FUEL, parser.nextInt());
+            position.set("accel", parser.nextInt() == 1);
+            position.set(Event.KEY_OUTPUT, parser.nextInt() + parser.nextInt() << 1);
         }
 
-        // Validity
-        position.setValid(parser.group(index++).compareTo("A") == 0);
+        position.setValid(parser.next().equals("A"));
 
         return position;
     }

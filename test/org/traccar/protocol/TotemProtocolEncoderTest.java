@@ -17,11 +17,12 @@ package org.traccar.protocol;
 
 import org.junit.Assert;
 import org.junit.Test;
+import org.traccar.ProtocolTest;
 import org.traccar.model.Command;
 
-public class TotemProtocolEncoderTest {
+public class TotemProtocolEncoderTest extends ProtocolTest {
     @Test
-    public void testDecode() throws Exception {
+    public void testEncode() throws Exception {
 
         TotemProtocolEncoder encoder = new TotemProtocolEncoder();
         

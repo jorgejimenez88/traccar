@@ -1,5 +1,5 @@
 /*
- * Copyright 2015 Anton Tananaev (anton.tananaev@gmail.com)
+ * Copyright 2015 - 2016 Anton Tananaev (anton.tananaev@gmail.com)
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,42 +16,11 @@
 package org.traccar.model;
 
 import java.util.Date;
-import java.util.LinkedHashMap;
-import java.util.Map;
 
-public abstract class Event {
-
-    private long id;
-    public long getId() { return id; }
-    public void setId(long id) { this.id = id; }
-
-    private String protocol;
-    public String getProtocol() { return protocol; }
-    public void setProtocol(String protocol) { this.protocol = protocol; }
-
-    private long deviceId;
-    public long getDeviceId() { return deviceId; }
-    public void setDeviceId(long deviceId) { this.deviceId = deviceId; }
-
-    private Date serverTime;
-    public Date getServerTime() { return serverTime; }
-    public void setServerTime(Date serverTime) { this.serverTime = serverTime; }
-
-    private Date deviceTime;
-    public Date getDeviceTime() { return deviceTime; }
-    public void setDeviceTime(Date deviceTime) { this.deviceTime = deviceTime; }
-
-    private Map<String, Object> other = new LinkedHashMap<>();
-    public Map<String, Object> getOther() { return other; }
-    public void setOther(Map<String, Object> other) { this.other = other; }
-
-    public void set(String key, boolean value) { other.put(key, value); }
-    public void set(String key, int value) { other.put(key, value); }
-    public void set(String key, long value) { other.put(key, value); }
-    public void set(String key, double value) { other.put(key, value); }
-    public void set(String key, String value) { if (value != null && !value.isEmpty()) other.put(key, value); }
+public abstract class Event extends Extensible {
 
     // Words separated by dashes (word-second-third)
+    public static final String KEY_ORIGINAL = "raw";
     public static final String KEY_INDEX = "index";
     public static final String KEY_HDOP = "hdop";
     public static final String KEY_SATELLITES = "sat";
@@ -61,6 +30,7 @@ public abstract class Event {
     public static final String KEY_ALARM = "alarm";
     public static final String KEY_STATUS = "status";
     public static final String KEY_ODOMETER = "odometer";
+    public static final String KEY_HOURS = "hours";
     public static final String KEY_INPUT = "input";
     public static final String KEY_OUTPUT = "output";
     public static final String KEY_POWER = "power";
@@ -68,7 +38,7 @@ public abstract class Event {
     public static final String KEY_MCC = "mcc";
     public static final String KEY_MNC = "mnc";
     public static final String KEY_LAC = "lac";
-    public static final String KEY_CELL = "cell";
+    public static final String KEY_CID = "cid";
     public static final String KEY_FUEL = "fuel";
     public static final String KEY_RFID = "rfid";
     public static final String KEY_VERSION = "version";
@@ -79,11 +49,75 @@ public abstract class Event {
     public static final String KEY_IP = "ip";
     public static final String KEY_ARCHIVE = "archive";
     public static final String KEY_DISTANCE = "distance";
+    public static final String KEY_RPM = "rpm";
+    public static final String KEY_VIN = "vin";
+    public static final String KEY_APPROXIMATE = "approximate";
+    public static final String KEY_THROTTLE = "throttle";
+    public static final String KEY_MOTION = "motion";
+
+    public static final String KEY_OBD_SPEED = "obd-speed";
+    public static final String KEY_OBD_ODOMETER = "obd-odometer";
 
     // Starts with 1 not 0
     public static final String PREFIX_TEMP = "temp";
     public static final String PREFIX_ADC = "adc";
     public static final String PREFIX_IO = "io";
     public static final String PREFIX_COUNT = "count";
+
+    private long id;
+
+    public long getId() {
+        return id;
+    }
+
+    public void setId(long id) {
+        this.id = id;
+    }
+
+    private String protocol;
+
+    public String getProtocol() {
+        return protocol;
+    }
+
+    public void setProtocol(String protocol) {
+        this.protocol = protocol;
+    }
+
+    private Date serverTime;
+
+    public Date getServerTime() {
+        if (serverTime != null) {
+            return new Date(serverTime.getTime());
+        } else {
+            return null;
+        }
+    }
+
+    public void setServerTime(Date serverTime) {
+        if (serverTime != null) {
+            this.serverTime = new Date(serverTime.getTime());
+        } else {
+            this.serverTime = null;
+        }
+    }
+
+    private Date deviceTime;
+
+    public Date getDeviceTime() {
+        if (deviceTime != null) {
+            return new Date(deviceTime.getTime());
+        } else {
+            return null;
+        }
+    }
+
+    public void setDeviceTime(Date deviceTime) {
+        if (deviceTime != null) {
+            this.deviceTime = new Date(deviceTime.getTime());
+        } else {
+            this.deviceTime = null;
+        }
+    }
 
 }
