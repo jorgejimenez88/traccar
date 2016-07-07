@@ -4,7 +4,7 @@
         "version": "3.5",
         "title": "traccar"
     },
-    "host": "demo.traccar.org",
+    "host": "localizagps.cu.cc:8082",
     "basePath": "/api",
     "schemes": [
         "http"
